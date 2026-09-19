@@ -1,6 +1,7 @@
 # LUBA — V1 UI/UX Design Brief
 
-**Document status:** FINAL (v1.0). UX and visual-behavior authority for LUBA V1.
+**Document status:** FINAL (v1.0) — **visual sections superseded by `docs/luba-master-design-authority.md` (LUBA PULSE, v2.0)**. Behavioral/product rules in this brief remain binding.
+> **DESIGN DIRECTION NOTICE (v2.0):** The "Market Ledger" theme (§1.1) and its warm-paper/warm-obsidian/brass, green-primary, amber-urgent visual language are **no longer the LUBA visual identity**. All visual design now inherits the **LUBA PULSE** direction defined in the Master Design Authority. Sections of this brief to re-read through the PULSE lens: §1 (theme/palette/typography), §7 (admin visual stance), §8 (loading-state conventions), §10 (motion), §14 (design-source principles). Product behavior — blind-bidding display rules, money formatting, status vocabulary, publication boundaries, receipt-first money flows, i18n rules — remains binding exactly as written.
 **Basis:** Approved PRD (product authority) and finalized `docs/luba-v1-trd.md` (technical authority). Where the PRD freezes product behavior, this brief only designs its presentation; where the TRD fixes technical behavior (transactional statuses, whitelisted projections, server authority), this brief designs around it and never contradicts it.
 **Out of scope here:** database schema (Backend Schema document), implementation architecture (TRD), task breakdown (Implementation Plan). No code is written in this document.
 
