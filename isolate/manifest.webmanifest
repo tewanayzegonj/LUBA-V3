@@ -1,0 +1,17 @@
+{
+  "name": "LUBA — Lowest Unique Bid Auction",
+  "short_name": "LUBA",
+  "description": "LUBA is an operator-curated, blind lowest-unique-bid auction marketplace for Ethiopian consumers: pay to bid in ETB, and the lowest unique bid wins the right to claim the physical prize.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#F9F9F4",
+  "theme_color": "#1D5BF0",
+  "icons": [
+    {
+      "src": "/logo.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="512" height="512" fill="none">
+  <!-- LUBA BrandMark — "The Lowest Unique Point" (docs/luba-master-design-authority.md §7).
+       Favicon/app-icon variant: fixed brand colors (cobalt #1D5BF0, gold #E8B33B)
+       because external SVG contexts cannot resolve CSS variables, plus a subtle
+       pearl tile (#F9F9F4 ≈ --background Pearl) for browser-tab separation.
+       Geometry matches src/components/brand/BrandMark.tsx. -->
+  <rect x="0" y="0" width="24" height="24" rx="5.5" fill="#F9F9F4"/>
+  <path d="M3.5 4.5 H7 L9.5 9.25 H12 L14.5 14.5 L18.5 20" stroke="#1D5BF0" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="18.5" cy="20" r="2.5" fill="#E8B33B"/>
+</svg>

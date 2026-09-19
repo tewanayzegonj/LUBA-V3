@@ -4,8 +4,8 @@
  * Two layers ("smallest abstraction that is reusable"):
  *  1. Pure evaluators — decision cores over caller-fetched data. Deterministic,
  *     side-effect-free, unit-testable without a Convex runtime.
- *  2. Thin ctx adapters — resolve identity from a Convex `ctx` (getAuthUserId,
- *     db.get) and delegate to the evaluators. No business logic here.
+ *  2. Thin ctx adapters — resolve identity from a Convex `ctx` and delegate
+ *     to the evaluators. No business logic here.
  *
  * TRD §28: server-side authorization in every function; the client is
  * untrusted. Backend Schema §2/§17: the finalized role model is the frozen
@@ -14,8 +14,15 @@
  *
  * Safe failure behavior: rejections return stable machine reasons and never
  * echo identity material (no phone numbers, no role names) back to callers.
+ *
+ * Identity boundary note (Phase C): `resolveUser` is the single server-side
+ * user-lookup boundary. The Convex Auth template files (auth.config.ts,
+ * auth.ts, auth/emailOtp.ts) remain do-not-modify; the SMS/OTP provider
+ * decision stays OPEN (TRD §4) and does not affect this boundary.
  */
 import type { Doc, Id } from "../_generated/dataModel";
+import type { QueryCtx } from "../_generated/server";
+import { getAuthUserId } from "@convex-dev/auth/server";
 
 import { requireVerifiedPhone } from "../domain/rules";
 
@@ -32,6 +39,18 @@ export type AuthGuardRejection =
 export type GuardOk<T> = { ok: true; value: T };
 export type GuardRejection = { ok: false; reason: AuthGuardRejection };
 export type GuardResult<T> = GuardOk<T> | GuardRejection;
+
+/**
+ * Identity resolution runs on a real Convex Query/Mutation ctx. The type is
+ * composed structurally — the template's documented auth bridge
+ * (`getAuthUserId`) for session resolution, plus the generated db reader —
+ * so adapters always compile against the real ctx, with no parallel shape
+ * to maintain and no divergence between tests and production.
+ */
+export type IdentityCtx = {
+  auth: Parameters<typeof getAuthUserId>[0]["auth"];
+  db: QueryCtx["db"];
+};
 
 /* ── Pure evaluators (unit-testable cores) ── */
 
@@ -100,29 +119,19 @@ export function evaluateOwnerOrOperator(
   return { ok: false, reason: "not_authorized" };
 }
 
-/* ── ctx adapters (thin; call the pure evaluators) ──
- * These are import-safe for unit tests because the Convex imports resolve
- * lazily at call time is not needed — the module only references `ctx`
- * structurally, so tests exercise the evaluators instead. */
+/* ── ctx adapters (thin; call the pure evaluators) ── */
 
 /**
- * Resolve the signed-in user row for a ctx. Reads `ctx.auth.userId` if
- * present, otherwise delegates to the template's getAuthUserId bridge.
- * Works for both QueryCtx and MutationCtx (structural typing).
+ * Resolve the signed-in user row for a ctx — the single server-side
+ * identity-lookup boundary. Uses the template's documented Convex Auth
+ * bridge (`getAuthUserId`): a session maps to its users row; a session
+ * without a matching user row resolves to null (guarded as
+ * `unauthenticated` upstream — never leaked as a distinct state).
  */
-export async function resolveUser(
-  ctx: { db: unknown } & Record<string, unknown>,
-): Promise<Doc<"users"> | null> {
-  const authApi = (ctx as { auth?: { getUserId?: () => Promise<Id<"users"> | null> } }).auth;
-  if (typeof authApi?.getUserId === "function") {
-    const userId = await authApi.getUserId();
-    if (userId === null) return null;
-    return await (ctx.db as { get: (id: Id<"users">) => Promise<Doc<"users"> | null> }).get(userId);
-  }
-  // Fallback: the template's documented bridge (getAuthUserId uses ctx.auth
-  // internally; reaching here means the caller passed a db-only ctx, which
-  // cannot be authenticated).
-  return null;
+export async function resolveUser(ctx: IdentityCtx): Promise<Doc<"users"> | null> {
+  const userId = await getAuthUserId(ctx);
+  if (userId === null) return null;
+  return await ctx.db.get(userId);
 }
 
 /**
@@ -130,7 +139,7 @@ export async function resolveUser(
  * Usage: `const { userId } = await requireAuthenticated(ctx);`
  */
 export async function requireAuthenticated(
-  ctx: Parameters<typeof resolveUser>[0],
+  ctx: IdentityCtx,
 ): Promise<GuardResult<{ userId: Id<"users"> }>> {
   return evaluateAuthenticatedUser(await resolveUser(ctx));
 }
@@ -140,7 +149,7 @@ export async function requireAuthenticated(
  * whose phone is missing or not verified (fail-closed; frozen gate).
  */
 export async function requireVerifiedPhoneUser(
-  ctx: Parameters<typeof resolveUser>[0],
+  ctx: IdentityCtx,
 ): Promise<GuardResult<{ userId: Id<"users"> }>> {
   return evaluateVerifiedPhoneUser(await resolveUser(ctx));
 }
@@ -150,7 +159,7 @@ export async function requireVerifiedPhoneUser(
  * Regular users can never perform operator actions.
  */
 export async function requireOperator(
-  ctx: Parameters<typeof requireAuthenticated>[0],
+  ctx: IdentityCtx,
 ): Promise<GuardResult<{ userId: Id<"users"> }>> {
   return evaluateOperator(await resolveUser(ctx));
 }

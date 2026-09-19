@@ -42,6 +42,7 @@
 - **[FROZEN]** `phoneVerified` flag on the user record; set only after successful OTP verification.
 - **[FROZEN]** Verified phone = primary fulfillment contact; normalized to E.164 at registration.
 - **[OPEN — technical, needs owner input]** (a) SMS provider for OTP and notifications with Ethiopia delivery coverage; (b) the template marks the existing Convex Auth files (`auth.config.ts`, `auth.ts`, `auth/emailOtp.ts`) as do-not-modify — adding a phone-OTP provider likely requires either a new custom provider file alongside them or platform approval to modify. Flagged as a dependency/decision, not silently worked around.
+- **[IMPLEMENTATION NOTE — boundary established, decision NOT resolved]** The provider-neutral identity boundary now exists: `src/convex/guards/auth.ts` (single identity-lookup/authorization boundary) and `src/convex/profile.ts` (`ensureLubaIdentity` internalMutation — the registration-defaults entry point called only AFTER successful OTP verification). Whatever provider is chosen must (1) deliver OTP codes, (2) verify them, then (3) call `ensureLubaIdentity` inside the verification transaction; nothing else in the codebase depends on the provider choice. Phone input canonicalization is centralized in `src/convex/domain/phone.ts` (`PHONE_POLICY` — the single point to adjust if numbering policy changes).
 
 ## 5. Authorization / Security Boundaries
 
