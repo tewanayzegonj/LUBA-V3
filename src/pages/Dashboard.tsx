@@ -1,5 +1,8 @@
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { PageShell } from "@/components/shell/PageShell";
+import { SiteFooter } from "@/components/shell/SiteFooter";
+import { SiteHeader } from "@/components/shell/SiteHeader";
 import { useAuth } from "@/hooks/use-auth";
 import { LayoutDashboard, LogOut } from "lucide-react";
 import { useNavigate } from "react-router";
@@ -14,8 +17,9 @@ export default function Dashboard() {
   };
 
   return (
-    <main className="min-h-screen bg-background px-6 py-10 text-foreground">
-      <div className="mx-auto flex w-full max-w-5xl flex-col gap-8">
+    <PageShell header={<SiteHeader />} footer={<SiteFooter />}>
+      <div className="px-6 py-10 text-foreground">
+        <div className="mx-auto flex w-full max-w-5xl flex-col gap-8">
         <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <p className="text-sm font-medium text-muted-foreground">
@@ -49,7 +53,8 @@ export default function Dashboard() {
             default.
           </CardContent>
         </Card>
+        </div>
       </div>
-    </main>
+    </PageShell>
   );
 }

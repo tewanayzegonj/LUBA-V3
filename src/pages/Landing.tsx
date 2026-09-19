@@ -2,15 +2,19 @@
 import { motion } from "framer-motion";
 import { Loader } from "lucide-react";
 import { BrandMark } from "@/components/brand/BrandMark";
+import { PageShell } from "@/components/shell/PageShell";
+import { SiteFooter } from "@/components/shell/SiteFooter";
+import { SiteHeader } from "@/components/shell/SiteHeader";
 
 export default function Landing() {
   return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      transition={{ duration: 0.5 }}
-      className="min-h-screen flex flex-col"
-    >
+    <PageShell header={<SiteHeader />} footer={<SiteFooter />}>
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.5 }}
+        className="flex flex-1 flex-col"
+      >
 
       
       {/* Main Content */}
@@ -40,6 +44,7 @@ export default function Landing() {
         
         </div>
       </div>
-    </motion.div>
+      </motion.div>
+    </PageShell>
   );
 }
