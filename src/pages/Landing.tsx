@@ -1,7 +1,7 @@
 // TODO: REPLACE THIS LANDING PAGE WITH AN ELEGANT, THEMATIC, AND WELL-DESIGNED LANDING PAGE RELEVANT TO THE PROJECT
 import { motion } from "framer-motion";
 import { Loader } from "lucide-react";
-import logo from "@/assets/logo.svg";
+import { BrandMark } from "@/components/brand/BrandMark";
 
 export default function Landing() {
   return (
@@ -18,13 +18,7 @@ export default function Landing() {
         <div className="max-w-5xl mx-auto relative px-4">
         {/* TODO: landing page goes here; replace with the landing page */}
         <div className="flex justify-center">
-          <img
-            src={logo}
-            alt="Lock Icon"
-            width={64}
-            height={64}
-            className="rounded-lg mb-8 mt-24"
-          />
+          <BrandMark size={64} label="LUBA" className="mb-8 mt-24" />
         </div>
         <div className="flex items-center justify-center text-foreground">
           <Loader className="h-8 w-8 animate-spin mr-4 shrink-0" />
