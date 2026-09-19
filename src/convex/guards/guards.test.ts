@@ -315,8 +315,6 @@ describe("projection boundaries", () => {
       "winnerId",
       "deliveryAddress",
       "winningBidId",
-      "refundStatus",
-      "rejectionReason",
       "bidDistribution",
       "lowestUniqueSantim",
     ]) {

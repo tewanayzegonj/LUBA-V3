@@ -58,10 +58,14 @@ export const PROHIBITED_PROJECTION_FIELDS = [
   "email",
   // private fulfillment information
   "deliveryAddress",
-  // blind-bidding internals — must never exist on any client surface
+  // blind-bidding internals — must never exist on any client surface.
+  // NOTE: refundStatus and rejectionReason are deliberately NOT here —
+  // PRD Q22 (FROZEN) exposes the OWNER's own bid refund status post-close,
+  // and Backend Schema §9 shows the owner a rejection reason class. Those
+  // context-dependent owner-surface fields are governed by per-surface
+  // whitelists, never a universal ban (a universal ban would make the
+  // frozen Q22 own-bids view structurally impossible).
   "winningBidId",
-  "refundStatus",
-  "rejectionReason",
   // uniqueness/ranking leakage guards (fields that must never be invented)
   "isUnique",
   "uniqueCount",
