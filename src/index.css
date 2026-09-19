@@ -3,7 +3,18 @@
 @import "tw-animate-css";
 @custom-variant dark (&:is(.dark *));
 
-/* DO NOT CHANGE */
+/* LUBA PULSE typography — Manrope (UI/body), Fraunces (display moments), Noto Sans Ethiopic (Amharic), IBM Plex Mono (codes/financial). Self-hosted via fontsource; font-display: swap is built in. */
+@import "@fontsource-variable/manrope/index.css";
+@import "@fontsource/fraunces/400.css";
+@import "@fontsource/fraunces/600.css";
+@import "@fontsource/fraunces/700.css";
+@import "@fontsource/noto-sans-ethiopic/400.css";
+@import "@fontsource/noto-sans-ethiopic/600.css";
+@import "@fontsource/ibm-plex-mono/400.css";
+@import "@fontsource/ibm-plex-mono/500.css";
+@import "@fontsource/ibm-plex-mono/600.css";
+
+/* DO NOT CHANGE — shadcn token mapping (extended below with PULSE semantic additions) */
 @theme inline {
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
@@ -40,87 +51,254 @@
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
+
+  /* LUBA PULSE semantic colors — same token names in Pearl (light) and Midnight (dark) */
+  --color-live: var(--live);
+  --color-live-foreground: var(--live-foreground);
+  --color-winner: var(--winner);
+  --color-winner-foreground: var(--winner-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-ink: var(--ink);
+  --color-ink-muted: var(--ink-muted);
+  --color-surface-raised: var(--surface-raised);
+  --color-surface-sunken: var(--surface-sunken);
+  --color-bid: var(--bid);
+  --color-bid-foreground: var(--bid-foreground);
+  --color-urgency: var(--urgency);
+  --color-urgency-foreground: var(--urgency-foreground);
+
+  /* LUBA PULSE typography — Manrope UI/body, Fraunces display, IBM Plex Mono data */
+  --font-sans: "Manrope Variable", "Manrope", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Fraunces", ui-serif, Georgia, serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace;
+  --font-ethiopic: "Noto Sans Ethiopic", "Manrope Variable", ui-sans-serif, system-ui, sans-serif;
+
+  /* LUBA PULSE structure tokens */
+  --spacing-section: 4rem;
+  --spacing-section-lg: 6rem;
+  --spacing-touch: 2.75rem; /* 44px coarse-pointer minimum */
+  --spacing-touch-lg: 3.5rem; /* 56px primary mobile CTA */
+  --radius-xs: calc(var(--radius) - 6px);
+  --radius-control: calc(var(--radius) - 2px);
+  --radius-panel: calc(var(--radius) + 6px);
+  --border-subtle: 1px;
+  --border-strong: 1.5px;
+
+
+  /* LUBA PULSE motion tokens (MDA §13) — micro 120–160ms, standard 200–280ms, major 300–400ms */
+  --duration-micro: 140ms;
+  --duration-standard: 240ms;
+  --duration-major: 360ms;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-spring: linear(
+    0, 0.0059 4.4%, 0.024 9.2%, 0.0565 13.9%, 0.1037 18.6%, 0.1637 23.2%,
+    0.2355 27.7%, 0.3163 32%, 0.4022 36.2%, 0.4924 40.2%, 0.5841 44.2%,
+    0.6735 48.2%, 0.7566 52.3%, 0.8269 56.5%, 0.8822 60.9%, 0.9226 65.6%,
+    0.9496 70.9%, 0.9665 76.4%, 0.9755 81.6%, 0.9814 87.5%, 0.9864 93.1%,
+    0.9904 99.2%, 1
+  );
 }
 
-/* CHANGE VALUES FOR THEME */
 :root {
+  /* ── LUBA PULSE · PEARL (light theme) ─────────────────────────────
+     Pearl/cool-ivory foundation, white surfaces, deep ink typography,
+     cobalt primary. Semantic roles: cobalt=action, aqua=live,
+     gold=winner/value, coral=urgency/error, ink+neutrals=structure. */
   --radius: 0.625rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
+
+  /* Foundation */
+  --background: oklch(0.976 0.006 106); /* pearl/cool-ivory canvas */
+  --foreground: oklch(0.22 0.028 262); /* deep ink */
+  --card: oklch(1 0 0); /* white surfaces */
+  --card-foreground: oklch(0.22 0.028 262);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.646 0.222 41.116);
-  --chart-2: oklch(0.6 0.118 184.704);
-  --chart-3: oklch(0.398 0.07 227.392);
-  --chart-4: oklch(0.828 0.189 84.429);
-  --chart-5: oklch(0.769 0.188 70.08);
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  --popover-foreground: oklch(0.22 0.028 262);
+  --surface-raised: oklch(1 0 0);
+  --surface-sunken: oklch(0.955 0.007 106);
+
+  /* Cobalt = primary action */
+  --primary: oklch(0.52 0.21 262); /* cobalt / electric blue */
+  --primary-foreground: oklch(0.99 0.003 262);
+  --bid: oklch(0.52 0.21 262); /* strongest action = bid CTA */
+  --bid-foreground: oklch(0.99 0.003 262);
+
+  /* Electric aqua = live/activity */
+  --live: oklch(0.68 0.115 205); /* aqua, tuned for contrast on light */
+  --live-foreground: oklch(0.27 0.06 230); /* deep teal-ink text on aqua */
+  --accent: oklch(0.94 0.03 205); /* aqua-tinted hover surfaces */
+  --accent-foreground: oklch(0.27 0.06 230);
+
+  /* Warm gold = winner/value/premium */
+  --winner: oklch(0.79 0.13 85);
+  --winner-foreground: oklch(0.32 0.075 75);
+
+  /* Coral = urgency/errors only (also drives destructive) */
+  --urgency: oklch(0.62 0.19 25);
+  --urgency-foreground: oklch(0.99 0.005 25);
+  --destructive: oklch(0.62 0.19 25);
+  --destructive-foreground: oklch(0.99 0.005 25);
+  --success: oklch(0.55 0.12 155); /* semantic state only — never brand */
+  --success-foreground: oklch(0.99 0.005 155);
+  --warning: oklch(0.75 0.14 85); /* gold-family, pending/settlement-near */
+  --warning-foreground: oklch(0.32 0.075 75);
+
+  /* Cool neutrals + structure */
+  --secondary: oklch(0.955 0.008 262);
+  --secondary-foreground: oklch(0.28 0.03 262);
+  --muted: oklch(0.955 0.008 262);
+  --muted-foreground: oklch(0.5 0.025 262);
+  --ink: oklch(0.22 0.028 262);
+  --ink-muted: oklch(0.5 0.025 262);
+  --border: oklch(0.895 0.012 262);
+  --input: oklch(0.88 0.012 262);
+  --ring: oklch(0.52 0.21 262); /* cobalt focus ring */
+  --chart-1: oklch(0.52 0.21 262); /* cobalt */
+  --chart-2: oklch(0.68 0.115 205); /* aqua */
+  --chart-3: oklch(0.79 0.13 85); /* gold */
+  --chart-4: oklch(0.62 0.19 25); /* coral */
+  --chart-5: oklch(0.55 0.12 155); /* success green (semantic) */
+  --sidebar: oklch(0.99 0.004 262);
+  --sidebar-foreground: oklch(0.22 0.028 262);
+  --sidebar-primary: oklch(0.52 0.21 262);
+  --sidebar-primary-foreground: oklch(0.99 0.003 262);
+  --sidebar-accent: oklch(0.955 0.008 262);
+  --sidebar-accent-foreground: oklch(0.28 0.03 262);
+  --sidebar-border: oklch(0.895 0.012 262);
+  --sidebar-ring: oklch(0.52 0.21 262);
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.488 0.243 264.376);
-  --chart-2: oklch(0.696 0.17 162.48);
-  --chart-3: oklch(0.769 0.188 70.08);
-  --chart-4: oklch(0.627 0.265 303.9);
-  --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  /* ── LUBA PULSE · MIDNIGHT (dark theme) ───────────────────────────
+     Rich midnight/navy foundation, layered surfaces, bright typography,
+     same accent family at adjusted intensity. Not "black + gold". */
+  --background: oklch(0.19 0.035 265); /* midnight navy */
+  --foreground: oklch(0.955 0.01 250); /* bright ink */
+  --card: oklch(0.225 0.038 264); /* layered surfaces step 1 */
+  --card-foreground: oklch(0.955 0.01 250);
+  --popover: oklch(0.235 0.04 264); /* step 2 (overlay) */
+  --popover-foreground: oklch(0.955 0.01 250);
+  --surface-raised: oklch(0.255 0.04 264);
+  --surface-sunken: oklch(0.165 0.03 265);
+
+  /* Cobalt, brightened for dark */
+  --primary: oklch(0.68 0.17 262);
+  --primary-foreground: oklch(0.16 0.04 265);
+  --bid: oklch(0.68 0.17 262);
+  --bid-foreground: oklch(0.16 0.04 265);
+
+  /* Electric aqua — brighter on dark */
+  --live: oklch(0.82 0.12 200);
+  --live-foreground: oklch(0.19 0.05 230);
+  --accent: oklch(0.28 0.045 220);
+  --accent-foreground: oklch(0.93 0.03 210);
+
+  /* Warm gold / champagne */
+  --winner: oklch(0.8 0.12 85);
+  --winner-foreground: oklch(0.24 0.06 75);
+  --urgency: oklch(0.66 0.18 25);
+  --urgency-foreground: oklch(0.16 0.03 25);
+  --destructive: oklch(0.66 0.18 25);
+  --destructive-foreground: oklch(0.99 0.005 25);
+  --success: oklch(0.68 0.12 155);
+  --success-foreground: oklch(0.16 0.04 155);
+  --warning: oklch(0.8 0.12 85);
+  --warning-foreground: oklch(0.24 0.06 75);
+
+  /* Cool neutrals, layered */
+  --secondary: oklch(0.27 0.038 264);
+  --secondary-foreground: oklch(0.93 0.012 250);
+  --muted: oklch(0.27 0.038 264);
+  --muted-foreground: oklch(0.72 0.025 255);
+  --ink: oklch(0.955 0.01 250);
+  --ink-muted: oklch(0.72 0.025 255);
+  --border: oklch(1 0 0 / 12%);
+  --input: oklch(1 0 0 / 16%);
+  --ring: oklch(0.68 0.17 262); /* cobalt focus ring */
+  --chart-1: oklch(0.68 0.17 262);
+  --chart-2: oklch(0.82 0.12 200);
+  --chart-3: oklch(0.8 0.12 85);
+  --chart-4: oklch(0.66 0.18 25);
+  --chart-5: oklch(0.68 0.12 155);
+  --sidebar: oklch(0.215 0.036 264);
+  --sidebar-foreground: oklch(0.955 0.01 250);
+  --sidebar-primary: oklch(0.68 0.17 262);
+  --sidebar-primary-foreground: oklch(0.16 0.04 265);
+  --sidebar-accent: oklch(0.27 0.038 264);
+  --sidebar-accent-foreground: oklch(0.93 0.012 250);
+  --sidebar-border: oklch(1 0 0 / 12%);
+  --sidebar-ring: oklch(0.68 0.17 262);
 }
 
 @layer base {
   * {
     @apply border-border outline-ring/50;
   }
+  html {
+    /* Font stacks from PULSE tokens; Ethiopic script falls through to Noto Sans Ethiopic via --font-ethiopic when lang=am */
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
   body {
     @apply bg-background text-foreground;
+    font-feature-settings: "tnum" on; /* tabular numerals for money/countdowns */
   }
   button:not([disabled]),
   [role="button"]:not([disabled]) {
     cursor: pointer;
+  }
+
+  /* Ethiopic support: when the app language is Amharic, Ethiopic glyphs resolve to Noto Sans Ethiopic with relaxed metrics (brief §11) */
+  html[lang="am"] body {
+    font-family: var(--font-ethiopic);
+    line-height: 1.65;
+  }
+  /* Focus ring: 2px cobalt, visible offset (MDA §15 focus state) */
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+
+  /* PULSE utility classes — public API for later phases.
+     Fraunces display moments are Latin-only; Ethiopic within display headings falls back cleanly. */
+  .font-display {
+    font-family: var(--font-display);
+    font-feature-settings: "ss01" on; /* Fraunces alternate display set */
+  }
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+  .tnum {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Motion token utilities (consumed by `motion` ecosystem + plain CSS) */
+  .transition-micro {
+    transition-duration: var(--duration-micro);
+    transition-timing-function: var(--ease-out);
+  }
+  .transition-standard {
+    transition-duration: var(--duration-standard);
+    transition-timing-function: var(--ease-out);
+  }
+  .transition-major {
+    transition-duration: var(--duration-major);
+    transition-timing-function: var(--ease-out);
+  }
+
+  /* Reduced motion: global parity — collapses all transitions/animations (MDA §13) */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
   }
 }
