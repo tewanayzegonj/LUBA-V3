@@ -17,6 +17,20 @@ const badgeVariants = cva(
           "border-transparent bg-destructive text-white [a&]:hover:bg-destructive/90 focus-visible:ring-destructive/20 dark:focus-visible:ring-destructive/40 dark:bg-destructive/60",
         outline:
           "text-foreground [a&]:hover:bg-accent [a&]:hover:text-accent-foreground",
+        /* LUBA PULSE semantic states — role discipline per MDA §5:
+           aqua=live/activity, gold=winner/value, success/warning are state
+           semantics only. Pair with an icon/label so state is never color
+           alone (MDA §15). */
+        live:
+          "border-transparent bg-live text-live-foreground [a&]:hover:bg-live/90",
+        winner:
+          "border-transparent bg-winner text-winner-foreground [a&]:hover:bg-winner/90",
+        success:
+          "border-transparent bg-success text-success-foreground [a&]:hover:bg-success/90",
+        warning:
+          "border-transparent bg-warning text-warning-foreground [a&]:hover:bg-warning/90",
+        urgency:
+          "border-transparent bg-urgency text-urgency-foreground [a&]:hover:bg-urgency/90",
       },
     },
     defaultVariants: {
