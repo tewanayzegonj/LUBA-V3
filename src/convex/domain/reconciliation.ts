@@ -13,7 +13,9 @@
  * liability of the platform), and leaves on a DEBIT.
  */
 
-/** Minimal posting shape used for calculations (as stored / as fetched). */
+import { walletAccount } from "./contracts";
+
+/** Minimal posting shape used for calculations (as now stored / as fetched). */
 export type ReconciliationPosting = {
   account: string;
   direction: "debit" | "credit";
@@ -87,7 +89,7 @@ export function walletReconciliation(
   differenceSantim: number;
   matches: boolean;
 } {
-  const ledgerBalance = -accountBalance(postings, walletAccountOf(wallet.userId));
+  const ledgerBalance = -accountBalance(postings, walletAccount(wallet.userId));
   const difference = wallet.availableSantim - ledgerBalance;
   return {
     ledgerBalanceSantim: ledgerBalance,
@@ -97,7 +99,108 @@ export function walletReconciliation(
   };
 }
 
-/** The wallet account string for a user (mirrors contracts.walletAccount). */
-function walletAccountOf(userId: string): string {
-  return `wallet:${userId}`;
+/* ── Wallet-set reconciliation (read-only) ──
+ * Inputs for the reconciliation job (Phase M exception queues): the ledger
+ * stays the source of truth; the wallet table is only ever a projection.
+ * All findings are REPORTED here — never repaired by writes — and users
+ * are identified by their wallet-account string (`wallet:{userId}`).
+ */
+
+export type WalletSetFinding =
+  /** No postings exist for a wallet that has a projection row. */
+  | { type: "no_ledger_activity"; account: string; availableSantim: number }
+  /** A wallet account has postings but no projection row. */
+  | { type: "missing_wallet"; account: string; ledgerBalanceSantim: number }
+  /** Negative available balance on a projection row (never legal). */
+  | { type: "negative_balance"; account: string; availableSantim: number }
+  /** Projection and ledger disagree on the available balance. */
+  | {
+      type: "balance_divergence";
+      account: string;
+      ledgerBalanceSantim: number;
+      walletAvailableSantim: number;
+      differenceSantim: number;
+    };
+
+export type WalletSetReconciliation = {
+  findings: WalletSetFinding[];
+  reconciledCount: number;
+};
+
+/**
+ * Reconcile a set of wallet projections against the ledger postings of
+ * their wallet accounts. Read-only: returns findings; callers decide what
+ * to do (report/queue for operators). Order-independent and deterministic.
+ */
+export function reconcileWalletProjections(
+  wallets: readonly WalletProjectionInput[],
+  postings: readonly ReconciliationPosting[],
+): WalletSetReconciliation {
+  const findings: WalletSetFinding[] = [];
+
+  // Negative balances are illegal regardless of ledger agreement.
+  for (const wallet of wallets) {
+    if (wallet.availableSantim < 0 || !Number.isInteger(wallet.availableSantim)) {
+      findings.push({
+        type: "negative_balance",
+        account: walletAccount(wallet.userId),
+        availableSantim: wallet.availableSantim,
+      });
+    }
+  }
+
+  const ledgerByUser = new Map<string, number>();
+  for (const posting of postings) {
+    if (!posting.account.startsWith("wallet:")) continue;
+    const userId = posting.account.slice("wallet:".length);
+    if (userId.length === 0) continue;
+    ledgerByUser.set(userId, (ledgerByUser.get(userId) ?? 0) + signedAmount(posting));
+  }
+
+  const projectedUsers = new Set(wallets.map((w) => w.userId));
+
+  // Projection rows vs ledger balances (credit-positive user perspective).
+  for (const wallet of wallets) {
+    if (!ledgerByUser.has(wallet.userId)) {
+      findings.push({
+        type: "no_ledger_activity",
+        account: walletAccount(wallet.userId),
+        availableSantim: wallet.availableSantim,
+      });
+      continue;
+    }
+    const ledgerBalance = -(ledgerByUser.get(wallet.userId) ?? 0);
+    const difference = wallet.availableSantim - ledgerBalance;
+    if (difference !== 0) {
+      findings.push({
+        type: "balance_divergence",
+        account: walletAccount(wallet.userId),
+        ledgerBalanceSantim: ledgerBalance,
+        walletAvailableSantim: wallet.availableSantim,
+        differenceSantim: difference,
+      });
+    }
+  }
+
+  // Ledger accounts with activity but no projection row.
+  for (const [userId, rawBalance] of ledgerByUser) {
+    if (!projectedUsers.has(userId)) {
+      findings.push({
+        type: "missing_wallet",
+        account: walletAccount(userId),
+        ledgerBalanceSantim: -rawBalance,
+      });
+    }
+  }
+
+  const reconciledCount = wallets.filter((wallet) => {
+    const ledger = ledgerByUser.get(wallet.userId);
+    return (
+      ledger !== undefined &&
+      wallet.availableSantim >= 0 &&
+      wallet.availableSantim === -ledger
+    );
+  }).length;
+
+  return { findings, reconciledCount };
 }

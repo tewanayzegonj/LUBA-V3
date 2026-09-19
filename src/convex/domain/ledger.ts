@@ -121,6 +121,29 @@ export function evaluatePosting(
 }
 
 /**
+ * Net wallet delta per user from a draft's wallet postings, expressed from
+ * the USER's perspective (credit-positive: a credit to their wallet account
+ * increases their available balance, a debit decreases it). Deterministic;
+ * multiple postings for the same user sum into one delta. Zero-delta users
+ * are omitted. The wallet-projection primitive applies this net delta to the
+ * projected available balance in the SAME transaction as the journal entry.
+ */
+export function netWalletDeltas(
+  postings: readonly PostingDraft[],
+): Map<Id<"users">, number> {
+  const deltas = new Map<Id<"users">, number>();
+  for (const posting of postings) {
+    if (!isWalletAccount(posting.account) || posting.userSide == null) continue;
+    const signed = posting.direction === "credit" ? posting.amountSantim : -posting.amountSantim;
+    deltas.set(posting.userSide, (deltas.get(posting.userSide) ?? 0) + signed);
+  }
+  for (const [user, delta] of deltas) {
+    if (delta === 0) deltas.delete(user);
+  }
+  return deltas;
+}
+
+/**
  * Validate a complete journal-entry draft: vocabulary membership, ≥ 2
  * postings, per-posting rules, the balance invariant, and the FROZEN
  * provenance rule (refund wallet credits must be tagged with their funding

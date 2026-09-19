@@ -76,6 +76,35 @@ export type LedgerDb = {
 
 export type LedgerCtx = { db: unknown };
 
+/**
+ * Shared idempotency identity for wallet/ledger economic operations.
+ * Exported so wallet-layer callers build the exact key/fingerprint the
+ * primitive checks and commits — no drift between pre-check and post.
+ */
+export function ledgerIdempotencyIdentity(input: {
+  op: IdempotencyOp;
+  ownerUserId: Id<"users"> | null;
+  idempotencyToken: string;
+  kind: LedgerEntryKind;
+  refType: LedgerRefType;
+  refId: string;
+  postings: LedgerEntryDraft["postings"];
+}) {
+  return {
+    key: deriveIdempotencyKey({
+      op: input.op,
+      userId: input.ownerUserId,
+      clientToken: input.idempotencyToken,
+    }),
+    fingerprint: fingerprintRequest({
+      kind: input.kind,
+      refType: input.refType,
+      refId: input.refId,
+      postings: input.postings,
+    }),
+  };
+}
+
 /* ── Input ── */
 
 export type PostLedgerTransactionInput = LedgerEntryDraft & {
