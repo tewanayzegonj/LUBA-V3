@@ -224,6 +224,43 @@ export const ACTOR_ROLES = ["user", "operator", "system"] as const;
 export type ActorRole = (typeof ACTOR_ROLES)[number];
 export const actorRole = v.union(...ACTOR_ROLES.map((s) => v.literal(s)));
 
+/**
+ * Closed audit action vocabulary (Backend Schema §14: actions span economic
+ * ops, lifecycle transitions, RESERVE/COMMIT/RELEASE, anti-snipe extension,
+ * notification send, operator actions). Extending this list is the only way
+ * a new audited action class can appear — keeps `auditEvents.action` a closed
+ * union in spirit while remaining a documented string in the schema.
+ */
+export const AUDIT_ACTIONS = [
+  // Economic operations (TRD §20)
+  "bid.accepted",
+  "bid.rejected",
+  "deposit.confirmed",
+  "settlement.completed",
+  "settlement.voided",
+  "refund.credited",
+  "withdrawal.transitioned",
+  // Lifecycle transitions (TRD §9)
+  "auction.scheduled",
+  "auction.opened",
+  "auction.closed",
+  "auction.settled",
+  "auction.cancelled",
+  // Inventory (TRD §12)
+  "inventory.reserved",
+  "inventory.committed",
+  "inventory.released",
+  // Anti-snipe (TRD §18)
+  "auction.antisnipe_extended",
+  // Notifications (TRD §15)
+  "notification.sent",
+  // Privileged/operator actions (TRD §20)
+  "operator.action",
+] as const;
+export type AuditAction = (typeof AUDIT_ACTIONS)[number];
+export const isAuditAction = (value: string): value is AuditAction =>
+  (AUDIT_ACTIONS as readonly string[]).includes(value);
+
 /* ── Notifications — frozen channel set: in-app + SMS only (no email) ── */
 export const NOTIFICATION_EVENTS = [
   "AUCTION_RESULT",
