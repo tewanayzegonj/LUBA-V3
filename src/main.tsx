@@ -1,6 +1,7 @@
 import '@vly-ai/integrations';
 import { Toaster } from "@/components/ui/sonner";
 import { ThemeProvider } from "next-themes";
+import { LanguageProvider } from "@/i18n/LanguageProvider";
 import { RequireAuth } from "@/components/RequireAuth";
 import { VlyToolbar } from "../vly-toolbar-readonly.tsx";
 import { ConvexAuthProvider } from "@convex-dev/auth/react";
@@ -123,6 +124,8 @@ createRoot(document.getElementById("root")!).render(
           enableSystem={false}
           disableTransitionOnChange
         >
+        {/* LUBA i18n: EN/AM runtime — persisted choice, html[lang] sync, typed t() */}
+        <LanguageProvider>
         <BrowserRouter>
           <RouteSyncer />
           <Suspense fallback={<RouteLoading />}>
@@ -144,6 +147,7 @@ createRoot(document.getElementById("root")!).render(
             </Routes>
           </Suspense>
         </BrowserRouter>
+        </LanguageProvider>
         <Toaster />
         </ThemeProvider>
       </ConvexAuthProvider>

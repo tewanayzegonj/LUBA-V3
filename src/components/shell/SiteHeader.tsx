@@ -1,4 +1,5 @@
 import { BrandLockup } from "@/components/brand/BrandMark";
+import { LanguageToggle } from "@/components/shell/LanguageToggle";
 import { Container } from "@/components/shell/PageShell";
 import { ThemeToggle } from "@/components/shell/ThemeToggle";
 import { Button } from "@/components/ui/button";
@@ -11,6 +12,7 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet";
 import { useAuth } from "@/hooks/use-auth";
+import { useLanguage } from "@/i18n/use-language";
 import { Home, LayoutDashboard, LogIn, LogOut, Menu } from "lucide-react";
 import { useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router";
@@ -20,12 +22,14 @@ import { Link, useLocation, useNavigate } from "react-router";
  *
  * One sticky, blur-backed bar for every shell page. Navigation is visually
  * simple and intentional: brand (home) on the left; on desktop, exactly one
- * honest account action plus the theme toggle — no invented nav links for
- * destinations that do not exist yet. On mobile, the same actions live in a
- * controlled right-side sheet with 44px+ rows (coarse-pointer minimum).
+ * honest account action plus the language and theme toggles — no invented
+ * nav links for destinations that do not exist yet. On mobile, the same
+ * controls live in the header cluster with 44px+ targets (coarse-pointer
+ * minimum) and the menu opens a controlled right-side sheet.
  *
- * Auth states are honest (MDA §15): a neutral skeleton while auth resolves —
- * never a guessed signed-in/signed-out state.
+ * All user-facing strings come from the typed i18n dictionary (EN/AM parity
+ * enforced by the compiler). Auth states are honest (MDA §15): a neutral
+ * skeleton while auth resolves — never a guessed signed-in/signed-out state.
  *
  * Motion: sheet slide is the built-in standard-timed transition; controls use
  * micro-timed hover/press feedback (transition-micro, scale ≤ 0.98). Reduced
@@ -33,6 +37,7 @@ import { Link, useLocation, useNavigate } from "react-router";
  */
 export function SiteHeader() {
   const { isLoading, isAuthenticated, signOut } = useAuth();
+  const { t } = useLanguage();
   const navigate = useNavigate();
   const location = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -61,7 +66,7 @@ export function SiteHeader() {
       <Container className="flex h-16 items-center justify-between gap-4">
         <Link
           to="/"
-          aria-label="LUBA home"
+          aria-label={t("shell.nav.lubaHome")}
           className="inline-flex h-11 items-center rounded-md"
         >
           <BrandLockup markSize={24} />
@@ -72,7 +77,7 @@ export function SiteHeader() {
           {isLoading ? (
             <span
               role="status"
-              aria-label="Loading menu"
+              aria-label={t("shell.nav.loading")}
               className="size-9 animate-pulse rounded-md bg-muted"
             />
           ) : isAuthenticated ? (
@@ -83,7 +88,7 @@ export function SiteHeader() {
             >
               <Link to="/dashboard">
                 <LayoutDashboard className="size-4" aria-hidden="true" />
-                Dashboard
+                {t("shell.nav.dashboard")}
               </Link>
             </Button>
           ) : (
@@ -94,22 +99,24 @@ export function SiteHeader() {
             >
               <Link to={authHref}>
                 <LogIn className="size-4" aria-hidden="true" />
-                Sign in
+                {t("shell.action.signIn")}
               </Link>
             </Button>
           )}
+          <LanguageToggle />
           <ThemeToggle />
         </div>
 
-        {/* Mobile cluster: theme + sheet menu (44px targets) */}
+        {/* Mobile cluster: language, theme, sheet menu (44px targets) */}
         <div className="flex items-center gap-1 md:hidden">
+          <LanguageToggle />
           <ThemeToggle />
           <Sheet open={menuOpen} onOpenChange={setMenuOpen}>
             <SheetTrigger asChild>
               <Button
                 variant="ghost"
                 size="icon"
-                aria-label="Open menu"
+                aria-label={t("shell.nav.openMenu")}
                 className="size-11 rounded-md text-muted-foreground transition-micro hover:bg-accent hover:text-accent-foreground active:scale-[0.98]"
               >
                 <Menu className="size-5" aria-hidden="true" />
@@ -121,18 +128,18 @@ export function SiteHeader() {
                   <BrandLockup markSize={22} />
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  Lowest unique bid wins
+                  {t("shell.brand.tagline")}
                 </p>
                 {/* Dialog a11y names, visually carried by the lockup above */}
-                <SheetTitle className="sr-only">LUBA menu</SheetTitle>
+                <SheetTitle className="sr-only">{t("shell.nav.siteMenu")}</SheetTitle>
                 <SheetDescription className="sr-only">
-                  Site navigation and account actions
+                  {t("shell.nav.siteNavigation")}
                 </SheetDescription>
               </SheetHeader>
-              <nav aria-label="Site" className="flex flex-col gap-1 px-3 pt-3">
+              <nav aria-label={t("shell.nav.siteNavigation")} className="flex flex-col gap-1 px-3 pt-3">
                 <Link to="/" onClick={closeMenu} className={mobileRowClass}>
                   <Home className="size-4 text-muted-foreground" aria-hidden="true" />
-                  Home
+                  {t("shell.nav.home")}
                 </Link>
                 {!isLoading && isAuthenticated && (
                   <Link
@@ -144,7 +151,7 @@ export function SiteHeader() {
                       className="size-4 text-muted-foreground"
                       aria-hidden="true"
                     />
-                    Dashboard
+                    {t("shell.nav.dashboard")}
                   </Link>
                 )}
               </nav>
@@ -157,12 +164,12 @@ export function SiteHeader() {
                       className={`${mobileRowClass} text-destructive hover:bg-destructive/10 hover:text-destructive`}
                     >
                       <LogOut className="size-4" aria-hidden="true" />
-                      Sign out
+                      {t("shell.action.signOut")}
                     </button>
                   ) : (
                     <Link to={authHref} onClick={closeMenu} className={mobileRowClass}>
                       <LogIn className="size-4 text-muted-foreground" aria-hidden="true" />
-                      Sign in
+                      {t("shell.action.signIn")}
                     </Link>
                   ))}
               </div>

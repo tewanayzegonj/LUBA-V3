@@ -1,5 +1,6 @@
 import { BrandLockup } from "@/components/brand/BrandMark";
 import { Container } from "@/components/shell/PageShell";
+import { useLanguage } from "@/i18n/use-language";
 import { Link } from "react-router";
 
 /**
@@ -12,22 +13,24 @@ import { Link } from "react-router";
  * rows meet the 44px coarse-pointer minimum.
  */
 export function SiteFooter() {
+  const { t } = useLanguage();
+
   return (
     <footer className="border-t border-border/60 bg-card/40">
       <Container className="flex flex-col gap-6 py-10 sm:flex-row sm:items-end sm:justify-between">
         <div className="flex flex-col gap-2">
           <Link
             to="/"
-            aria-label="LUBA home"
+            aria-label={t("shell.nav.lubaHome")}
             className="inline-flex h-11 w-fit items-center rounded-md"
           >
             <BrandLockup markSize={24} />
           </Link>
           <p className="font-display text-lg leading-snug text-foreground">
-            The lowest unique bid wins.
+            {t("shell.brand.footerStatement")}
           </p>
           <p className="max-w-sm text-sm leading-relaxed text-muted-foreground">
-            Blind bidding. ETB wallet. Operator-curated prizes.
+            {t("shell.brand.statements")}
           </p>
         </div>
         <div className="flex flex-col gap-1 sm:items-end">
@@ -35,10 +38,10 @@ export function SiteFooter() {
             to="/"
             className="inline-flex h-11 items-center rounded-md px-1 text-sm font-medium text-muted-foreground transition-micro hover:text-foreground"
           >
-            Home
+            {t("shell.footer.home")}
           </Link>
           <p className="text-xs text-muted-foreground">
-            © {new Date().getFullYear()} LUBA
+            {t("shell.footer.copyright", { year: new Date().getFullYear() })}
           </p>
         </div>
       </Container>

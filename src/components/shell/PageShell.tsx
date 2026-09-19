@@ -1,4 +1,5 @@
 import { cn } from "@/lib/utils";
+import { useLanguage } from "@/i18n/use-language";
 import type { ReactNode } from "react";
 
 /**
@@ -27,6 +28,8 @@ export function PageShell({
   footer?: ReactNode;
   className?: string;
 }) {
+  const { t } = useLanguage();
+
   return (
     <div
       className={cn(
@@ -39,7 +42,7 @@ export function PageShell({
         href="#main"
         className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50 focus:rounded-md focus:bg-primary focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-primary-foreground focus:shadow-lg"
       >
-        Skip to main content
+        {t("shell.nav.skipToContent")}
       </a>
       {header}
       <main

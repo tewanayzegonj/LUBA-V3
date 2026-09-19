@@ -2,27 +2,28 @@ import { Moon, Sun } from "lucide-react";
 import { useTheme } from "next-themes";
 
 import { Button } from "@/components/ui/button";
+import { useLanguage } from "@/i18n/use-language";
 import { cn } from "@/lib/utils";
 
 /**
  * LUBA PULSE theme toggle — Pearl (light) ⇄ Midnight (dark).
  *
- * The single sanctioned shell-theme interaction. Mounted-guarded (SSR /
- * pre-hydration safe): renders a stable placeholder button until the theme
- * preference resolves, so the control never misrepresents state.
- *
- * State feedback is icon + label (never color alone, MDA §15); the icon
+ * The single sanctioned shell-theme interaction. Accessible name describes
+ * the target state (icon + label, never color alone, MDA §15); the icon
  * crossfades at micro timing and is fully collapsed under reduced motion by
  * the global parity rule in index.css.
  */
 export function ThemeToggle({ className }: { className?: string }) {
   const { resolvedTheme, setTheme } = useTheme();
+  const { t } = useLanguage();
 
   // Client-only SPA with a fixed default: resolvedTheme is synchronous from
   // the first render — no mounted guard needed (and none wanted: it would
   // require setState-in-effect, which the render-cascade rule forbids).
   const isDark = resolvedTheme === "dark";
-  const nextLabel = isDark ? "Switch to light theme" : "Switch to dark theme";
+  const nextLabel = isDark
+    ? t("shell.theme.toLight")
+    : t("shell.theme.toDark");
 
   return (
     <Button
