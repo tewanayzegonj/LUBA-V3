@@ -177,11 +177,11 @@ export type RestorationPlan =
   | { ok: false; reason: RestorationRejection };
 
 /**
- * Validate a restoration of previously consumed provenance. Each restored
- * amount must fit: `remaining + amount <= original` for its lot, and the
- * lot must belong to the same owner. Preserves lot identity/category —
- * restoration only moves `remaining`/`status`. Pure; applying it is the
- * financial layer's atomic job.
+ * Validate a restoration of previously consumed provenance. Each lot's
+ * AGGREGATE restoration must fit: `remaining + amount <= original` per lot,
+ * and every lot must belong to the same owner. Preserves lot
+ * identity/category — restoration only moves `remaining`/`status`. Pure;
+ * applying it is the financial layer's atomic job.
  */
 export function planLotRestoration(
   ownerUserId: Id<"users">,
@@ -192,28 +192,37 @@ export function planLotRestoration(
     return { ok: false, reason: "invalid_amount" };
   }
 
+  // Aggregate per lot FIRST: multiple records touching one lot must be
+  // validated JOINTLY against the snapshot — two individually-valid records
+  // could otherwise over-credit the same lot past its immutable original.
+  const perLot = new Map<Id<"provenanceLots">, number>();
+  for (const record of restorations) {
+    if (!isPositiveSantim(record.amountSantim)) return { ok: false, reason: "invalid_amount" };
+    perLot.set(record.lotId, (perLot.get(record.lotId) ?? 0) + record.amountSantim);
+  }
+
   const validated: Allocation[] = [];
   const reopenedLotIds: Id<"provenanceLots">[] = [];
   let total = 0;
 
-  for (const record of restorations) {
-    if (!isPositiveSantim(record.amountSantim)) return { ok: false, reason: "invalid_amount" };
-    const lot = lotsById.get(record.lotId);
+  for (const [lotId, amountSantim] of perLot) {
+    const lot = lotsById.get(lotId);
     if (lot === undefined) return { ok: false, reason: "lot_not_found" };
     if (lot.userId !== ownerUserId) return { ok: false, reason: "lot_owner_mismatch" };
     if (!isNonNegativeSantim(lot.remainingSantim)) return { ok: false, reason: "restoration_exceeds_original" };
 
-    const resulting = lot.remainingSantim + record.amountSantim;
+    const resulting = lot.remainingSantim + amountSantim;
     if (resulting > lot.originalSantim) {
       // Restoration can never credit a lot beyond what it originally held —
-      // this is also the structural barrier against re-funding arbitrary lots.
+      // checked on the aggregate; also the structural barrier against
+      // re-funding arbitrary lots.
       return { ok: false, reason: "restoration_exceeds_original" };
     }
     if (resulting === lot.originalSantim && lot.status === "exhausted") {
       reopenedLotIds.push(lot._id);
     }
-    validated.push({ lotId: record.lotId, amountSantim: record.amountSantim });
-    total += record.amountSantim;
+    validated.push({ lotId, amountSantim });
+    total += amountSantim;
   }
 
   return { ok: true, restorations: validated, reopenedLotIds, totalSantim: total };

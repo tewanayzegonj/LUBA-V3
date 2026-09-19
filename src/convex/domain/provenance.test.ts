@@ -545,4 +545,67 @@ describe("provenance immutability", () => {
     // Across consume → restore cycles the category is byte-identical.
     expect(store.rows[0]?.fundingCategory).toBe("paid_deposit");
   });
+
+  test("two overlapping restorations for one lot are validated JOINTLY (over-credit regression)", async () => {
+    // Regression: two individually-valid records for the SAME lot could
+    // jointly exceed the immutable original. original 30_00, remaining
+    // 20_00; two × 10_00 records are each valid alone (20+10=30) but
+    // jointly would credit 40_00 > 30_00. Must be refused atomically.
+    const store = makeProvenanceDb();
+    const a = await createProvenanceLot(store, {
+      userId: USER,
+      paymentEventId: PAY_EVENT,
+      originalSantim: 30_00,
+    });
+    if (!a.ok) throw new Error("setup failed");
+    await consumeProvenanceLots(store, {
+      ownerUserId: USER,
+      requestedSantim: 10_00,
+      orderedLotIds: [a.lotId],
+    });
+    expect(store.rows[0]?.remainingSantim).toBe(20_00);
+
+    const patchesBeforeRestore = store.patchCalls.length;
+    const restore = await restoreProvenanceLots(store, {
+      ownerUserId: USER,
+      records: [
+        { lotId: a.lotId, amountSantim: 10_00 },
+        { lotId: a.lotId, amountSantim: 10_00 },
+      ],
+    });
+    expect(restore.ok).toBe(false);
+    if (!restore.ok) expect(restore.reason).toBe("restoration_exceeds_original");
+    expect(store.patchCalls.length).toBe(patchesBeforeRestore); // zero patches
+    expect(store.rows[0]?.remainingSantim).toBe(20_00); // untouched
+  });
+
+  test("multiple records for one lot that JOINTLY fit are aggregated and applied together", async () => {
+    const store = makeProvenanceDb();
+    const a = await createProvenanceLot(store, {
+      userId: USER,
+      paymentEventId: PAY_EVENT,
+      originalSantim: 50_00,
+    });
+    if (!a.ok) throw new Error("setup failed");
+    await consumeProvenanceLots(store, {
+      ownerUserId: USER,
+      requestedSantim: 30_00,
+      orderedLotIds: [a.lotId],
+    });
+    expect(store.rows[0]?.remainingSantim).toBe(20_00);
+
+    const restore = await restoreProvenanceLots(store, {
+      ownerUserId: USER,
+      records: [
+        { lotId: a.lotId, amountSantim: 10_00 },
+        { lotId: a.lotId, amountSantim: 10_00 },
+      ],
+    });
+    expect(restore.ok).toBe(true);
+    if (!restore.ok) throw new Error("expected restored");
+    expect(restore.totalSantim).toBe(20_00);
+    expect(restore.restorations).toEqual([{ lotId: a.lotId, amountSantim: 20_00 }]);
+    expect(store.rows[0]?.remainingSantim).toBe(40_00);
+    expect(store.rows[0]?.status).toBe("open"); // never exhausted
+  });
 });
