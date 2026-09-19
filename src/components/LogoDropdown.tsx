@@ -36,7 +36,7 @@ export function LogoDropdown() {
         <Button
           variant="ghost"
           size="icon"
-          className="h-10 w-10"
+          className="h-11 w-11"
           aria-label="LUBA menu"
         >
           <BrandMark size={28} decorative />

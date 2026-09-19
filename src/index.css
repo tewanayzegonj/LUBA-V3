@@ -245,7 +245,54 @@
   }
   body {
     @apply bg-background text-foreground;
+    font-family: var(--font-sans);
+    line-height: 1.6; /* comfortable reading rhythm; Amharic override below */
     font-feature-settings: "tnum" on; /* tabular numerals for money/countdowns */
+  }
+
+  /* PULSE typographic defaults for headings (MDA §6 scale 12/14/16/20/24/32…).
+     Tailwind v4 preflight resets h1–h6 to inherit — without these, every
+     heading renders as body text. Utilities (text-3xl etc.) still win. */
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-weight: 700;
+    text-wrap: balance;
+  }
+  h1 {
+    font-size: 2rem;
+    line-height: 1.15;
+    letter-spacing: -0.02em;
+  }
+  h2 {
+    font-size: 1.5rem;
+    line-height: 1.2;
+    letter-spacing: -0.015em;
+  }
+  h3 {
+    font-size: 1.25rem;
+    line-height: 1.25;
+    letter-spacing: -0.01em;
+  }
+  h4 {
+    font-size: 1.125rem;
+    line-height: 1.3;
+    font-weight: 600;
+  }
+  h5,
+  h6 {
+    font-size: 1rem;
+    line-height: 1.4;
+    font-weight: 600;
+  }
+  p {
+    text-wrap: pretty; /* avoids orphaned last lines in paragraphs */
+  }
+  a {
+    text-underline-offset: 3px; /* distinguishable, calm link affordance */
   }
   button:not([disabled]),
   [role="button"]:not([disabled]) {
@@ -273,6 +320,22 @@
     font-variant-numeric: tabular-nums;
   }
   .tnum {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* PULSE text roles — composable size utilities (color via text-* classes) */
+  .text-caption {
+    font-size: 0.75rem;
+    line-height: 1.4;
+    letter-spacing: 0.01em;
+  }
+  .text-helper {
+    font-size: 0.8125rem;
+    line-height: 1.5;
+  }
+  /* Numeric/data text: IBM Plex Mono + tabular figures — codes, amounts, countdowns (MDA §6) */
+  .font-data {
+    font-family: var(--font-mono);
     font-variant-numeric: tabular-nums;
   }
 
