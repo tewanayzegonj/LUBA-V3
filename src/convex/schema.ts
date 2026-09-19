@@ -122,13 +122,15 @@ const schema = defineSchema(
     /* ── §4.4 provenanceLots — funding provenance (TRD §6) ──
        Deposits create lots; debits consume lots; every refund re-credits the
        lots that originally funded the refunded bid. Lot-selection ordering is
-       IMPL, owned by the financial layer. */
+       IMPL, owned by the financial layer. `fundingCategory` carries the lot's
+       frozen funding class verbatim — never reclassified (vocabulary OPEN). */
     provenanceLots: defineTable({
-      userId: v.id("users"),
-      paymentEventId: v.id("paymentEvents"),
-      originalSantim: v.number(), // integer
-      remainingSantim: v.number(), // decremented by debits; >= 0
+      userId: v.id("users"), // exactly one owner (Backend Schema §4.4)
+      paymentEventId: v.id("paymentEvents"), // source/reference of the funds
+      originalSantim: v.number(), // integer, > 0; immutable after creation
+      remainingSantim: v.number(), // integer, 0 <= remaining <= original
       status: lotStatus, // open | exhausted
+      fundingCategory: v.optional(v.string()), // funding class carried verbatim; vocabulary OPEN
       createdAt: v.number(),
     })
       .index("by_user_status_remaining", ["userId", "status", "remainingSantim"]) // lot selection
