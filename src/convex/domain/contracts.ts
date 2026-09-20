@@ -100,6 +100,25 @@ export const CONFIRMATION_SOURCES = [
   "receipt_verification",
 ] as const;
 export type ConfirmationSource = (typeof CONFIRMATION_SOURCES)[number];
+
+/* V1 payment purpose: paymentEvents are DEPOSIT intents (Backend Schema §5.1).
+   Withdrawal payouts are separate withdrawalRequests records (§6) — no
+   paymentEvents purpose beyond deposit exists in V1. */
+export const PAYMENT_PURPOSES = ["deposit"] as const;
+export type PaymentPurpose = (typeof PAYMENT_PURPOSES)[number];
+
+/* Ingested provider-event verification lifecycle (adapter boundary, IMPL —
+   not a schema field): "unverified" at ingestion; "verified" only after
+   server-to-server verification (maps to paymentConfirmations.verified=true);
+   "rejected" when verification fails. Provider payloads are untrusted input
+   until an adapter reports verified=true. */
+export const PROVIDER_EVENT_VERIFICATION = [
+  "unverified",
+  "verified",
+  "rejected",
+] as const;
+export type EventVerificationStatus =
+  (typeof PROVIDER_EVENT_VERIFICATION)[number];
 export const confirmationSource = v.union(
   ...CONFIRMATION_SOURCES.map((s) => v.literal(s)),
 );
