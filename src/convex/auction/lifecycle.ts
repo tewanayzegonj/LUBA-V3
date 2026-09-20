@@ -37,7 +37,6 @@
  */
 import type { Id } from "../_generated/dataModel";
 
-import type { AuctionStatus } from "../domain/contracts";
 import {
   evaluateAntiSnipeExtension,
   evaluateCloseEligibility,
@@ -254,11 +253,7 @@ export type CloseAuctionResult =
     }
   | {
       ok: false;
-      reason:
-        | "auction_not_found"
-        | "illegal_transition"
-        | "too_early"
-        | "finalization_failed";
+      reason: "auction_not_found" | "illegal_transition" | "too_early";
     };
 
 /**
@@ -304,18 +299,17 @@ export async function closeAuction(
   });
 
   // Phase I composition point: determination + settlement-pending /
-  // NO_WINNER release, same transaction. A throw aborts everything.
+  // NO_WINNER release, same transaction. A finalize throw propagates:
+  // in Convex any thrown error ABORTS the transaction, so a failing
+  // finalization can never commit a result-less CLOSED auction (zero
+  // partial state — the pre-close patch rolls back with everything else).
   let result: "WINNER" | "NO_WINNER" | null = null;
   if (input.finalize !== undefined) {
-    try {
-      const outcome = await input.finalize(ctx, {
-        auctionId: input.auctionId,
-        now: input.now,
-      });
-      result = outcome.result;
-    } catch {
-      return { ok: false, reason: "finalization_failed" };
-    }
+    const outcome = await input.finalize(ctx, {
+      auctionId: input.auctionId,
+      now: input.now,
+    });
+    result = outcome.result;
   }
 
   await recordAuditEvent(ctx, {

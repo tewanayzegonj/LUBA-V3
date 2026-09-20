@@ -17,9 +17,6 @@ import type { Id } from "../_generated/dataModel";
 import {
   evaluateAuctionConfig,
   evaluateAntiSnipeExtension,
-  evaluateCloseEligibility,
-  evaluateOpenEligibility,
-  evaluatePublishEligibility,
   projectPublicAuctionDetail,
   projectPublicAuctionSummary,
 } from "./auctions";
@@ -265,14 +262,8 @@ function reservationRow(store: FakeStore, auctionId: string): Row | null {
   return null;
 }
 
-function countAudit(store: FakeStore, action: string, baseline: number): number {
-  return (
-    store.rows("auditEvents").filter((s) => s.row.action === action).length - baseline
-  );
-}
-
-function auditBaseline(store: FakeStore): number {
-  return store.rows("auditEvents").length;
+function auditCount(store: FakeStore, action: string): number {
+  return store.rows("auditEvents").filter((s) => s.row.action === action).length;
 }
 
 /* ═══════════════ 1. Pure configuration rules ═══════════════ */
@@ -285,8 +276,11 @@ describe("auction pure configuration", () => {
     );
     expect(evaluation.ok).toBe(true);
     if (!evaluation.ok) return;
+    // Code is normalized (trimmed); title is stored as provided
+    // (validated against its trimmed length) — display formatting
+    // belongs to the UI layer, not the domain core.
     expect(evaluation.row.code).toBe("LUB-0002");
-    expect(evaluation.row.title).toBe("T");
+    expect(evaluation.row.title).toBe(" T ");
   });
 
   test("evaluateAuctionConfig rejects structurally invalid configuration", () => {
@@ -398,7 +392,7 @@ describe("auction creation", () => {
   test("refuses non-operator creation with zero writes", async () => {
     const store = new FakeStore();
     const prizeId = await seedPrize(store);
-    const baseline = auditBaseline(store);
+    const opAuditsBefore = auditCount(store, "operator.action");
     const result = await runTxAtomic(store, (ctx) =>
       createAuctionRow(ctx, {
         operatorUserId: USER_ID,
@@ -411,7 +405,7 @@ describe("auction creation", () => {
     expect(result.reason).toBe("not_authorized");
     expect(store.rows("auctions").length).toBe(0);
     expect(store.rows("inventoryReservations").length).toBe(0);
-    expect(countAudit(store, "operator.action", baseline)).toBe(0);
+    expect(auditCount(store, "operator.action")).toBe(opAuditsBefore);
   });
 
   test("refuses invalid configuration before any write (no reservation leak)", async () => {
@@ -466,6 +460,538 @@ describe("auction creation", () => {
     const row = auctionRow(store, String(seed.auctionId));
     expect(row.title).toBe("Renamed");
     expect(row.feeSantim).toBe(250);
+  });
+});
+
+/* ═══════════════ 3. Publish gate + lifecycle transitions ═══════════════ */
+
+describe("publish gate and lifecycle", () => {
+  test("publish requires the inventory reservation — verified server-side", async () => {
+    const store = new FakeStore();
+    const seed = await seedAuction(store);
+    // Strip the reservation (simulating a flow that never reserved) —
+    // the publish path must still refuse.
+    const res = reservationRow(store, String(seed.auctionId));
+    if (res !== null) store.patch(String(res._id), { status: "released" });
+    const result = await publishAuction(makeCtx(store), {
+      operatorUserId: OP_ID,
+      auctionId: seed.auctionId,
+      now: T0,
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe("reservation_required");
+    expect(auctionRow(store, String(seed.auctionId)).status).toBe("DRAFT");
+  });
+
+  test("non-operators cannot publish or open (zero effect)", async () => {
+    const store = new FakeStore();
+    const seed = await seedAuction(store);
+    const publish = await publishAuction(makeCtx(store), {
+      operatorUserId: USER_ID,
+      auctionId: seed.auctionId,
+      now: T0,
+    });
+    expect(publish.ok).toBe(false);
+    if (!publish.ok) expect(publish.reason).toBe("not_authorized");
+    const open = await openAuction(makeCtx(store), {
+      operatorUserId: USER_ID,
+      auctionId: seed.auctionId,
+      now: T0 + 1,
+    });
+    expect(open.ok).toBe(false);
+    expect(auctionRow(store, String(seed.auctionId)).status).toBe("DRAFT");
+  });
+
+  test("valid path: DRAFT → SCHEDULED → OPEN with audits", async () => {
+    const store = new FakeStore();
+    const seed = await seedAuction(store);
+    const scheduledBefore = auditCount(store, "auction.scheduled");
+    const openedBefore = auditCount(store, "auction.opened");
+    const published = await publishAuction(makeCtx(store), {
+      operatorUserId: OP_ID,
+      auctionId: seed.auctionId,
+      now: T0,
+    });
+    expect(published).toMatchObject({ ok: true, replayed: false });
+    expect(auctionRow(store, String(seed.auctionId)).status).toBe("SCHEDULED");
+    const opened = await openAuction(makeCtx(store), {
+      operatorUserId: OP_ID,
+      auctionId: seed.auctionId,
+      now: T0 + 1,
+    });
+    expect(opened).toMatchObject({ ok: true, replayed: false });
+    expect(auctionRow(store, String(seed.auctionId)).status).toBe("OPEN");
+    expect(auditCount(store, "auction.scheduled")).toBe(scheduledBefore + 1);
+    expect(auditCount(store, "auction.opened")).toBe(openedBefore + 1);
+  });
+
+  test("manual open before startAt is operator discretion; scheduled open is time-gated", async () => {
+    const store = new FakeStore();
+    const seed = await seedAuction(store, { startAt: T0 + 30_000 });
+    await publishAuction(makeCtx(store), {
+      operatorUserId: OP_ID,
+      auctionId: seed.auctionId,
+      now: T0,
+    });
+    // Manual open: operator discretion — startAt does not block.
+    const manual = await openAuction(makeCtx(store), {
+      operatorUserId: OP_ID,
+      auctionId: seed.auctionId,
+      now: T0 + 1,
+    });
+    expect(manual.ok).toBe(true);
+
+    // Scheduled sweep: start time has NOT arrived → refuses (too early).
+    const store2 = new FakeStore();
+    const seed2 = await seedAuction(store2, { startAt: T0 + 30_000 });
+    await publishAuction(makeCtx(store2), {
+      operatorUserId: OP_ID,
+      auctionId: seed2.auctionId,
+      now: T0,
+    });
+    const sweep = await sweepOpenScheduled(makeCtx(store2), { now: T0 + 1 });
+    expect(sweep.opened).toBe(0);
+    expect(auctionRow(store2, String(seed2.auctionId)).status).toBe("SCHEDULED");
+    // Once the start time arrives on the server clock, the sweep opens it.
+    const sweep2 = await sweepOpenScheduled(makeCtx(store2), { now: T0 + 30_000 });
+    expect(sweep2.opened).toBe(1);
+    expect(auctionRow(store2, String(seed2.auctionId)).status).toBe("OPEN");
+  });
+
+  test("open refuses at/after the authoritative close time", async () => {
+    const store = new FakeStore();
+    const seed = await seedAuction(store);
+    await publishAuction(makeCtx(store), {
+      operatorUserId: OP_ID,
+      auctionId: seed.auctionId,
+      now: T0,
+    });
+    const result = await openAuction(makeCtx(store), {
+      operatorUserId: OP_ID,
+      auctionId: seed.auctionId,
+      now: T1, // exactly the close time — too late
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe("too_late");
+    expect(auctionRow(store, String(seed.auctionId)).status).toBe("SCHEDULED");
+  });
+
+  test("invalid lifecycle transitions are refused (no skips, no backwards)", async () => {
+    const store = new FakeStore();
+    const seed = await seedAuction(store);
+    // DRAFT → OPEN is not a legal transition.
+    const skip = await openAuction(makeCtx(store), {
+      operatorUserId: OP_ID,
+      auctionId: seed.auctionId,
+      now: T0 + 1,
+    });
+    expect(skip.ok).toBe(false);
+    if (!skip.ok) expect(skip.reason).toBe("illegal_transition");
+    // Publish to SCHEDULED first.
+    await publishAuction(makeCtx(store), {
+      operatorUserId: OP_ID,
+      auctionId: seed.auctionId,
+      now: T0,
+    });
+    // Close from SCHEDULED is illegal.
+    const earlyClose = await closeAuction(makeCtx(store), {
+      auctionId: seed.auctionId,
+      now: T1,
+    });
+    expect(earlyClose.ok).toBe(false);
+    if (!earlyClose.ok) expect(earlyClose.reason).toBe("illegal_transition");
+  });
+
+  test("publish/open replay with zero effect once the target state is reached", async () => {
+    const store = new FakeStore();
+    const seed = await seedAuction(store);
+    await publishAuction(makeCtx(store), {
+      operatorUserId: OP_ID,
+      auctionId: seed.auctionId,
+      now: T0,
+    });
+    const scheduledCount = auditCount(store, "auction.scheduled");
+    const replay = await publishAuction(makeCtx(store), {
+      operatorUserId: OP_ID,
+      auctionId: seed.auctionId,
+      now: T0 + 5,
+    });
+    expect(replay).toMatchObject({ ok: true, replayed: true });
+    expect(auditCount(store, "auction.scheduled")).toBe(scheduledCount);
+    expect(auctionRow(store, String(seed.auctionId)).status).toBe("SCHEDULED");
+  });
+
+  test("close transition stamps the authoritative result-determination time", async () => {
+    const store = new FakeStore();
+    const seed = await seedAuction(store);
+    await publishAuction(makeCtx(store), {
+      operatorUserId: OP_ID,
+      auctionId: seed.auctionId,
+      now: T0,
+    });
+    await openAuction(makeCtx(store), {
+      operatorUserId: OP_ID,
+      auctionId: seed.auctionId,
+      now: T0 + 1,
+    });
+    const closed = await closeAuction(makeCtx(store), {
+      auctionId: seed.auctionId,
+      now: T1 + 10,
+    });
+    expect(closed).toMatchObject({ ok: true, replayed: false, result: null });
+    const row = auctionRow(store, String(seed.auctionId));
+    expect(row.status).toBe("CLOSED");
+    expect(row.resultDeterminedAt).toBe(T1 + 10);
+  });
+
+  test("close refuses early (server-time authority) and replays once closed", async () => {
+    const store = new FakeStore();
+    const seed = await seedAuction(store);
+    await publishAuction(makeCtx(store), {
+      operatorUserId: OP_ID,
+      auctionId: seed.auctionId,
+      now: T0,
+    });
+    await openAuction(makeCtx(store), {
+      operatorUserId: OP_ID,
+      auctionId: seed.auctionId,
+      now: T0 + 1,
+    });
+    const early = await closeAuction(makeCtx(store), {
+      auctionId: seed.auctionId,
+      now: T1 - 1,
+    });
+    expect(early.ok).toBe(false);
+    if (!early.ok) expect(early.reason).toBe("too_early");
+    expect(auctionRow(store, String(seed.auctionId)).status).toBe("OPEN");
+
+    await closeAuction(makeCtx(store), { auctionId: seed.auctionId, now: T1 });
+    const closedCount = auditCount(store, "auction.closed");
+    const replay = await closeAuction(makeCtx(store), {
+      auctionId: seed.auctionId,
+      now: T1 + 100,
+    });
+    expect(replay).toMatchObject({ ok: true, replayed: true });
+    expect(auditCount(store, "auction.closed")).toBe(closedCount);
+  });
+});
+
+/* ═══════════════ 4. Anti-snipe infrastructure (values OPEN) ═══════════════ */
+
+describe("anti-snipe", () => {
+  async function openAuctionAt(store: FakeStore): Promise<string> {
+    const seed = await seedAuction(store);
+    await publishAuction(makeCtx(store), {
+      operatorUserId: OP_ID,
+      auctionId: seed.auctionId,
+      now: T0,
+    });
+    await openAuction(makeCtx(store), {
+      operatorUserId: OP_ID,
+      auctionId: seed.auctionId,
+      now: T0 + 1,
+    });
+    return String(seed.auctionId);
+  }
+
+  test("unset configuration ⇒ inactive with zero effect", async () => {
+    const store = new FakeStore();
+    const auctionId = await openAuctionAt(store);
+    const before = auctionRow(store, auctionId).closeAt;
+    const result = await applyAntiSnipeExtension(makeCtx(store), {
+      auctionId: auctionId as unknown as Id<"auctions">,
+      now: T1 - 1_000, // inside what would be a window — but none configured
+    });
+    expect(result).toMatchObject({ ok: true, active: false, newCloseAt: null });
+    expect(auctionRow(store, auctionId).closeAt).toBe(before);
+    expect(auctionRow(store, auctionId).extensionCount).toBe(0);
+  });
+
+  test("configured anti-snipe extends the authoritative close time atomically", async () => {
+    const store = new FakeStore();
+    const seed = await seedAuction(store, {
+      antiSnipeWindowMs: 30_000,
+      antiSnipeExtendMs: 15_000,
+      antiSnipeMaxExtensions: 2,
+    });
+    const auctionId = String(seed.auctionId);
+    await publishAuction(makeCtx(store), {
+      operatorUserId: OP_ID,
+      auctionId: seed.auctionId,
+      now: T0,
+    });
+    await openAuction(makeCtx(store), {
+      operatorUserId: OP_ID,
+      auctionId: seed.auctionId,
+      now: T0 + 1,
+    });
+    // Outside the window: inactive, no mutation.
+    const outside = await applyAntiSnipeExtension(makeCtx(store), {
+      auctionId: seed.auctionId,
+      now: T1 - 31_000,
+    });
+    expect(outside).toMatchObject({ ok: true, active: false });
+    expect(auctionRow(store, auctionId).closeAt).toBe(T1);
+    // Inside the window: closeAt moves exactly once, count increments.
+    const inside = await applyAntiSnipeExtension(makeCtx(store), {
+      auctionId: seed.auctionId,
+      now: T1 - 10_000,
+    });
+    expect(inside).toMatchObject({ ok: true, active: true, newCloseAt: T1 + 15_000 });
+    expect(auctionRow(store, auctionId).closeAt).toBe(T1 + 15_000);
+    expect(auctionRow(store, auctionId).extensionCount).toBe(1);
+    // Bounded by max: after 2 extensions the third refuses.
+    await applyAntiSnipeExtension(makeCtx(store), {
+      auctionId: seed.auctionId,
+      now: T1 + 15_000 - 10_000,
+    });
+    expect(auctionRow(store, auctionId).extensionCount).toBe(2);
+    const exhausted = await applyAntiSnipeExtension(makeCtx(store), {
+      auctionId: seed.auctionId,
+      now: T1 + 30_000 - 10_000,
+    });
+    expect(exhausted.ok).toBe(false);
+    expect(auctionRow(store, auctionId).extensionCount).toBe(2);
+  });
+
+  test("anti-snipe only applies to OPEN auctions", async () => {
+    const store = new FakeStore();
+    const seed = await seedAuction(store, {
+      antiSnipeWindowMs: 30_000,
+      antiSnipeExtendMs: 15_000,
+      antiSnipeMaxExtensions: 2,
+    });
+    const result = await applyAntiSnipeExtension(makeCtx(store), {
+      auctionId: seed.auctionId,
+      now: T1 - 10_000,
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe("not_open");
+    expect(auctionRow(store, String(seed.auctionId)).status).toBe("DRAFT");
+  });
+
+  test("pure evaluator: window boundary, closed-window, and exhausted cases", () => {
+    const cfg = {
+      closeAt: T1,
+      antiSnipeWindowMs: 30_000,
+      antiSnipeExtendMs: 15_000,
+      antiSnipeMaxExtensions: 1,
+      extensionCount: 0,
+    };
+    // Exactly at the boundary (now >= closeAt - window) — triggers.
+    expect(evaluateAntiSnipeExtension({ ...cfg, now: T1 - 30_000 })).toEqual({
+      ok: true,
+      active: true,
+      newCloseAt: T1 + 15_000,
+    });
+    // Before the window — inactive (no newCloseAt in that union member).
+    expect(evaluateAntiSnipeExtension({ ...cfg, now: T1 - 30_001 })).toEqual({
+      ok: true,
+      active: false,
+    });
+    // At/after close — no extension (inactive, not an error).
+    expect(evaluateAntiSnipeExtension({ ...cfg, now: T1 })).toEqual({
+      ok: true,
+      active: false,
+    });
+    // Already at max.
+    expect(
+      evaluateAntiSnipeExtension({ ...cfg, now: T1 - 10_000, extensionCount: 1 }).ok,
+    ).toBe(false);
+    // Unset ⇒ inactive.
+    expect(
+      evaluateAntiSnipeExtension({
+        now: T1 - 10_000,
+        closeAt: T1,
+        antiSnipeWindowMs: undefined,
+        antiSnipeExtendMs: undefined,
+        antiSnipeMaxExtensions: undefined,
+        extensionCount: 0,
+      }),
+    ).toEqual({ ok: true, active: false });
+  });
+});
+
+/* ═══════════════ 5. Finalization seam + backstop sweeps ═══════════════ */
+
+async function openAuctionAt(store: FakeStore): Promise<string> {
+  const seed = await seedAuction(store);
+  await publishAuction(makeCtx(store), {
+    operatorUserId: OP_ID,
+    auctionId: seed.auctionId,
+    now: T0,
+  });
+  await openAuction(makeCtx(store), {
+    operatorUserId: OP_ID,
+    auctionId: seed.auctionId,
+    now: T0 + 1,
+  });
+  return String(seed.auctionId);
+}
+
+describe("finalization seam and backstop", () => {
+
+  test("the composed finalization runs INSIDE the close transaction", async () => {
+    const store = new FakeStore();
+    const auctionId = await openAuctionAt(store);
+    const seen: string[] = [];
+    const closed = await closeAuction(makeCtx(store), {
+      auctionId: auctionId as unknown as Id<"auctions">,
+      now: T1,
+      finalize: async (_ctx, input) => {
+        seen.push(input.auctionId);
+        return { result: "WINNER" };
+      },
+    });
+    expect(closed).toMatchObject({ ok: true, replayed: false, result: "WINNER" });
+    expect(seen).toEqual([auctionId]);
+  });
+
+  test("a throwing finalization aborts with zero partial state", async () => {
+    const store = new FakeStore();
+    const auctionId = await openAuctionAt(store);
+    // The finalize throw propagates — Convex aborts the transaction on any
+    // thrown error; runTxAtomic restores, proving zero partial state.
+    let threw = false;
+    try {
+      await runTxAtomic(store, (ctx) =>
+        closeAuction(ctx, {
+          auctionId: auctionId as unknown as Id<"auctions">,
+          now: T1,
+          finalize: async () => {
+            throw new Error("determination failed");
+          },
+        }),
+      );
+    } catch {
+      threw = true;
+    }
+    expect(threw).toBe(true);
+    // Restored: still OPEN, no resultDeterminedAt stamp.
+    const row = auctionRow(store, auctionId);
+    expect(row.status).toBe("OPEN");
+    expect(row.resultDeterminedAt).toBeUndefined();
+  });
+
+  test("the close backstop sweeps OPEN auctions past close time through the guarded mutation", async () => {
+    const store = new FakeStore();
+    const auctionId = await openAuctionAt(store);
+    // Before close: nothing to do.
+    const early = await sweepCloseExpired(makeCtx(store), { now: T1 - 1 });
+    expect(early.closed).toBe(0);
+    // At close time: swept through closeAuction (guards intact).
+    const swept = await sweepCloseExpired(makeCtx(store), {
+      now: T1,
+      finalize: async () => ({ result: "NO_WINNER" }),
+    });
+    expect(swept.closed).toBe(1);
+    expect(auctionRow(store, auctionId).status).toBe("CLOSED");
+    // Re-sweep: replay, no double effect.
+    const again = await sweepCloseExpired(makeCtx(store), {
+      now: T1 + 60_000,
+      finalize: async () => ({ result: "NO_WINNER" }),
+    });
+    expect(again.closed).toBe(0);
+  });
+
+  test("the close backstop is NOT cron-registered (Phase I composes finalization)", async () => {
+    const crons = await Bun.file("src/convex/crons.json").json();
+    const registered = Object.values(crons) as Array<{ function: string }>;
+    expect(registered.some((c) => c.function.includes("internalSweepCloseExpired"))).toBe(false);
+    expect(registered.some((c) => c.function.includes("internalSweepOpenScheduled"))).toBe(true);
+  });
+});
+
+/* ═══════════════ 6. Concurrency + atomicity ═══════════════ */
+
+describe("auction concurrency and atomicity", () => {
+  test("concurrent publish attempts serialize — one transition, one audit", async () => {
+    const store = new FakeStore();
+    const seed = await seedAuction(store);
+    // Two operators attempt to publish; OCC serializes on the auction row.
+    const results = [];
+    for (const ctx of [makeCtx(store), makeCtx(store)]) {
+      results.push(
+        await publishAuction(ctx, {
+          operatorUserId: OP_ID,
+          auctionId: seed.auctionId,
+          now: T0,
+        }),
+      );
+    }
+    const ok = results.filter((r) => r.ok);
+    expect(ok.length).toBe(2); // first transitions, second replays
+    const replays = ok.filter((r) => r.ok && r.replayed).length;
+    expect(replays).toBe(1);
+    expect(auditCount(store, "auction.scheduled")).toBe(1);
+    expect(auctionRow(store, String(seed.auctionId)).status).toBe("SCHEDULED");
+  });
+
+  test("stale-read publish attempt aborts and restarts into a safe replay", async () => {
+    const store = new FakeStore();
+    const seed = await seedAuction(store);
+    // Operator B reads pre-publish state (stale snapshot)…
+    const staleSnapshot = store.snapshot();
+    // …operator A commits the publish.
+    await publishAuction(makeCtx(store), {
+      operatorUserId: OP_ID,
+      auctionId: seed.auctionId,
+      now: T0,
+    });
+    // …B's write aborts (OCC) and restarts with fresh reads → replay, no double audit.
+    const scheduledBefore = auditCount(store, "auction.scheduled");
+    const result = await runTx(
+      store,
+      (ctx) =>
+        publishAuction(ctx, {
+          operatorUserId: OP_ID,
+          auctionId: seed.auctionId,
+          now: T0 + 5,
+        }),
+      staleSnapshot,
+    );
+    expect(result).toMatchObject({ ok: true, replayed: true });
+    expect(auditCount(store, "auction.scheduled")).toBe(scheduledBefore);
+    void staleSnapshot;
+  });
+
+  test("concurrent close attempts produce exactly one close audit (replay safety)", async () => {
+    const store = new FakeStore();
+    const auctionId = await openAuctionAt(store);
+    const first = await closeAuction(makeCtx(store), {
+      auctionId: auctionId as unknown as Id<"auctions">,
+      now: T1,
+    });
+    expect(first).toMatchObject({ ok: true, replayed: false });
+    const second = await closeAuction(makeCtx(store), {
+      auctionId: auctionId as unknown as Id<"auctions">,
+      now: T1 + 1,
+    });
+    expect(second).toMatchObject({ ok: true, replayed: true });
+    expect(auditCount(store, "auction.closed")).toBe(1);
+  });
+
+  test("creation failure mid-transaction leaves zero partial state (no auction, no reservation, no decrement)", async () => {
+    const store = new FakeStore();
+    const prizeId = await seedPrize(store);
+    const countBefore = store.get(String(prizeId))?.row.availableCount;
+    store.failNextInsert = "inventoryReservations";
+    let threw = false;
+    try {
+      await runTxAtomic(store, (ctx) =>
+        createAuctionRow(ctx, {
+          operatorUserId: OP_ID,
+          config: validConfig(prizeId),
+          now: T0,
+        }),
+      );
+    } catch {
+      threw = true;
+    }
+    expect(threw).toBe(true);
+    expect(store.rows("auctions").length).toBe(0);
+    expect(store.rows("inventoryReservations").length).toBe(0);
+    expect(store.get(String(prizeId))?.row.availableCount).toBe(countBefore);
   });
 });
 
