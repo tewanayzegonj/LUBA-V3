@@ -1,5 +1,5 @@
 import { useAuth } from "@/hooks/use-auth";
-import { Loader2 } from "lucide-react";
+import { LubaOrb } from "@/components/ui/luba-orb";
 import type { ReactNode } from "react";
 import { Navigate, useLocation } from "react-router";
 
@@ -8,9 +8,11 @@ export function RequireAuth({ children }: { children: ReactNode }) {
   const location = useLocation();
 
   if (isLoading) {
+    // Verifying the signed-in session — standalone scale orb, "connecting"
+    // truthfully names the session/connectivity check in progress.
     return (
       <main className="flex min-h-screen items-center justify-center bg-background">
-        <Loader2 className="size-6 animate-spin text-muted-foreground" />
+        <LubaOrb state="connecting" size={64} />
       </main>
     );
   }

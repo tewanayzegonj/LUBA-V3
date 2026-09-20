@@ -1,6 +1,6 @@
 // TODO: REPLACE THIS LANDING PAGE WITH AN ELEGANT, THEMATIC, AND WELL-DESIGNED LANDING PAGE RELEVANT TO THE PROJECT
 import { motion } from "framer-motion";
-import { Loader } from "lucide-react";
+import { LubaOrb } from "@/components/ui/luba-orb";
 import { BrandMark } from "@/components/brand/BrandMark";
 import { PageShell } from "@/components/shell/PageShell";
 import { SiteFooter } from "@/components/shell/SiteFooter";
@@ -25,7 +25,7 @@ export default function Landing() {
           <BrandMark size={64} label="LUBA" className="mb-8 mt-24" />
         </div>
         <div className="flex items-center justify-center text-foreground">
-          <Loader className="h-8 w-8 animate-spin mr-4 shrink-0" />
+          <LubaOrb state="working" size={20} className="mr-4 shrink-0 self-center" />
           <span className="text-base">
             <a
               href="https://freebuff.com"
