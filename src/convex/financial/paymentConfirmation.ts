@@ -87,6 +87,40 @@ export type ConfirmPaymentInput = {
   event: IngestedProviderEvent;
   /** Which frozen confirmation source delivered this verification attempt. */
   source: ConfirmationSource;
+  /**
+   * OPTIONAL economic effect executed INSIDE the same transaction after
+   * every confirmation check passes, BEFORE the confirmation row is
+   * written. This is how the deposit flow composes confirmation + lot
+   * creation + ledger + wallet under ONE idempotency key: the effect runs
+   * exactly once (replays and conflicts never reach it), and its returned
+   * id is merged into the stored outcome so a replay returns the original
+   * result. Any throw aborts the whole transaction (OCC) — zero effect.
+   */
+  effect?: ConfirmationEffect;
+};
+
+/** Data the effect may rely on (server truth, already validated). */
+export type ConfirmationEffectContext = {
+  /** Structural db access inside the caller's transaction. */
+  db: unknown;
+  paymentEventId: Id<"paymentEvents">;
+  /** Verified owner of the payment (server truth). */
+  userId: Id<"users">;
+  /** Server-derived exact amount (integer ETB santims). */
+  amountSantim: number;
+  /** Frozen provider vocabulary member for this event. */
+  provider: PaymentProvider;
+  /** The confirmation source of THIS attempt. */
+  source: ConfirmationSource;
+  /** The idempotency key shared by confirmation and effect. */
+  idempotencyKey: string;
+};
+
+export type ConfirmationEffect = {
+  /** Must return the effect's entity id; stored for replay. */
+  perform: (ctx: ConfirmationEffectContext) => Promise<string>;
+  /** Entity table of the effect's outcome (for the registry refType). */
+  refType: string;
 };
 
 export type PaymentConfirmationRejection =
@@ -102,12 +136,26 @@ export type ConfirmPaymentResult =
       paymentEventId: Id<"paymentEvents">;
       /** True when this exact confirmation was already processed (zero effect). */
       replayed: boolean;
+      /** The composed effect's entity id (present when an effect ran/is stored). */
+      effectRefId: string | null;
+      effectRefType: string | null;
     }
   | { ok: false; reason: PaymentConfirmationRejection };
 
 /** The stored idempotency outcome for a successful confirmation. */
-function confirmationOutcome(paymentEventId: Id<"paymentEvents">): string {
-  return JSON.stringify({ status: "confirmed", paymentEventId });
+function confirmationOutcome(
+  paymentEventId: Id<"paymentEvents">,
+  confirmationId: Id<"paymentConfirmations">,
+  effect?: { effectRefType?: string; effectRefId: string },
+): string {
+  return JSON.stringify({
+    status: "confirmed",
+    paymentEventId,
+    confirmationId,
+    ...(effect !== undefined && effect.effectRefType !== undefined
+      ? { effectRefType: effect.effectRefType, effectRefId: effect.effectRefId }
+      : {}),
+  });
 }
 
 /**
@@ -146,12 +194,24 @@ export async function confirmPaymentEvent(
 
   const idem = await checkIdempotencyKey(ctx, { key, fingerprint });
   if (idem.status === "replay") {
+    // The stored outcome carries the full original result (confirmation id
+    // plus, when composed, the effect entity). Return it verbatim — ZERO
+    // economic effect on this path.
+    const stored = JSON.parse(idem.outcome) as {
+      confirmationId?: string;
+      effectRefType?: string;
+      effectRefId?: string;
+    };
     return {
       ok: true,
       replayed: true,
       paymentEventId: input.paymentEventId,
-      // The commit recorded refType=paymentConfirmations, refId=confirmationId.
-      confirmationId: idem.refId as Id<"paymentConfirmations">,
+      confirmationId:
+        stored.confirmationId !== undefined
+          ? (stored.confirmationId as Id<"paymentConfirmations">)
+          : (idem.refId as Id<"paymentConfirmations">),
+      effectRefId: stored.effectRefId ?? null,
+      effectRefType: stored.effectRefType ?? null,
     };
   }
   if (idem.status === "conflict") {
@@ -197,6 +257,21 @@ export async function confirmPaymentEvent(
   const transition = evaluatePaymentTransition(row.status, "confirmed");
   if (!transition.ok) return { ok: false, reason: "payment_not_confirmable" };
 
+  // 5a. The composed economic effect (if any) runs INSIDE this transaction
+  // before the confirmation row exists — replay/conflict never reach it.
+  let effectRefId: string | null = null;
+  if (input.effect !== undefined) {
+    effectRefId = await input.effect.perform({
+      db: ctx.db,
+      paymentEventId: input.paymentEventId,
+      userId: row.userId,
+      amountSantim: row.amountSantim,
+      provider: row.provider,
+      source: input.source,
+      idempotencyKey: key,
+    });
+  }
+
   const now = Date.now();
   const confirmationId = (await db.insert("paymentConfirmations", {
     paymentEventId: input.paymentEventId,
@@ -216,9 +291,15 @@ export async function confirmPaymentEvent(
     op: "deposit_confirm",
     userId: row.userId,
     fingerprint,
-    refType: "paymentConfirmations",
-    refId: confirmationId,
-    outcome: confirmationOutcome(input.paymentEventId),
+    // With a composed effect, the registry points at the EFFECT's entity
+    // (the economically meaningful outcome — e.g. the ledger entry).
+    refType: input.effect !== undefined ? input.effect.refType : "paymentConfirmations",
+    refId: effectRefId ?? confirmationId,
+    outcome: confirmationOutcome(input.paymentEventId, confirmationId,
+      input.effect !== undefined && effectRefId !== null
+        ? { effectRefType: input.effect.refType, effectRefId }
+        : undefined,
+    ),
   });
 
   // Audit evidence: provider/reference/verification data only — no raw
@@ -245,5 +326,7 @@ export async function confirmPaymentEvent(
     replayed: false,
     confirmationId,
     paymentEventId: input.paymentEventId,
+    effectRefId,
+    effectRefType: input.effect?.refType ?? null,
   };
 }
