@@ -20,14 +20,21 @@
  *  - Queries never mutate (TRD §9): display-only derived status lives in
  *    the pure module; all transitions happen here, inside mutations.
  *
- * Finalization seam (TRD §9/§11): `closeAuction` performs OPEN → CLOSED
- * (state + time guard, `resultDeterminedAt`, audit) and accepts the Phase I
- * composition hook — winner determination, settlement-pending for WINNER,
- * and NO_WINNER release/refunds run INSIDE the same transaction through
- * `finalize`. Until Phase I composes it, the close backstop MUST NOT be
- * cron-registered: a CLOSED auction whose result was never determined does
- * not exist in the frozen model. The open sweep registers now; the
- * close/settlement sweeps register with Phase I.
+ * Finalization seam (TRD §9/§11): `closeAuction` accepts the Phase I
+ * composition hook and invokes finalization BEFORE committing CLOSED —
+ * the status patch and `resultDeterminedAt` stamp live in the same Convex
+ * transaction as the determination, so CLOSED commits only after winner
+ * determination succeeds (a finalize throw propagates and aborts
+ * everything). This preserves the TRD meaning of CLOSED: bidding ended +
+ * result determined — a result-less CLOSED auction does not exist in the
+ * frozen model. WINNER ⇒ settlement pending (inventory stays held);
+ * NO_WINNER ⇒ release + refunds + SETTLED, all decided in-transaction.
+ *
+ * Backstop registration: the open sweep is cron-registered now; the close
+ * backstop/settlement path is deliberately NOT registered in Phase G, and
+ * Phase I MUST register it in crons.json with its finalization hook
+ * composed — until then an OPEN auction past close simply waits for
+ * Phase I's sweep rather than ever committing a result-less CLOSED state.
  *
  * Anti-snipe (TRD §18): infrastructure only. All three parameters are
  * OPEN — unset ⇒ inactive. When configured, the extension applies from
@@ -259,11 +266,15 @@ export type CloseAuctionResult =
 /**
  * Close/finalization seam: OPEN → CLOSED at/after the authoritative close
  * time. Time-driven only — an early close refuses (`too_early`); the close
- * time moves only via anti-snipe. `resultDeterminedAt` is stamped here;
- * the Phase I hook determines the result in the SAME transaction (WINNER
- * ⇒ settlement pending, inventory stays held; NO_WINNER ⇒ release + refunds
- * + SETTLED). Idempotent: re-closing a CLOSED/SETTLED auction replays with
- * zero effect — the sweep cannot double-finalize.
+ * time moves only via anti-snipe. Ordering guarantee: finalization (the
+ * Phase I hook) runs BEFORE the CLOSED state commits — the status patch,
+ * `resultDeterminedAt`, and the determination outcome are one transaction,
+ * so CLOSED only ever commits with a determined result (TRD §9 meaning:
+ * bidding ended + result determined): WINNER ⇒ settlement pending
+ * (inventory stays held); NO_WINNER ⇒ release + refunds + SETTLED. A
+ * finalize throw propagates and aborts the transaction — no partial state.
+ * Idempotent: re-closing a CLOSED/SETTLED auction replays with zero
+ * effect — the sweep cannot double-finalize.
  */
 export async function closeAuction(
   ctx: AuctionCtx,
@@ -452,8 +463,11 @@ export type SweepCloseResult = {
 
 /**
  * Close backstop seam: OPEN auctions past their authoritative close time
- * go through the guarded close mutation. ⚠ NOT cron-registered until Phase
- * I composes the finalization hook — see the module doc-comment.
+ * go through the guarded close mutation (guards never bypassed).
+ * ⚠ Deliberately NOT cron-registered in Phase G — Phase I MUST register
+ * this sweep in crons.json together with its finalization hook, so every
+ * closed auction commits with a determined result. See the module
+ * doc-comment.
  */
 export async function sweepCloseExpired(
   ctx: AuctionCtx,
