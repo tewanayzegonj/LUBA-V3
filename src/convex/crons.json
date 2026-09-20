@@ -1,0 +1,7 @@
+{
+  "sweepOpenScheduled": {
+    "type": "scheduled",
+    "crontab": "* * * * *",
+    "function": "auctions:internalSweepOpenScheduled"
+  }
+}
