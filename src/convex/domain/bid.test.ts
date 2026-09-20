@@ -795,6 +795,14 @@ describe("own-bid projection — blind safety", () => {
 /* ── 8. Surface-level guard rejections (auth) ── */
 
 describe("auth guards on the bid path", () => {
+  test("unauthenticated rejection is fail-closed at the guard layer (pure evaluator)", async () => {
+    const { evaluateVerifiedPhoneUser } = await import("../guards/auth");
+    // No user row at all (no session) ⇒ refused.
+    const anonymous = evaluateVerifiedPhoneUser(null as never);
+    expect(anonymous.ok).toBe(false);
+    expect(anonymous.ok ? null : anonymous.reason).toBe("unauthenticated");
+  });
+
   test("unverified phone is fail-closed at the guard layer (pure evaluator)", async () => {
     const { evaluateVerifiedPhoneUser } = await import("../guards/auth");
     const unverified = { _id: BIDDER, phone: "+251911000001", phoneVerified: false };
