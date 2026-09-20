@@ -19,6 +19,13 @@
  *    distribution, other bidders, or live counters — structural blindness,
  *    Backend Schema §9/§18.2).
  *
+ *    Own-bid visibility during an OPEN auction is INTENTIONAL, not an
+ *    oversight: TRD §19 [FROZEN] restricts live own-bid information to
+ *    "transactional status only" and TRD §8 allows the live own-bid list to
+ *    show "own amounts + status; nothing else" — the prohibition is on
+ *    uniqueness/duplication/winning/ranking/other bids, never on own
+ *    amounts. The Q22 shape governs both live and post-close views here.
+ *
  * No live bid counter exists (OPEN decision, TRD §19); no public bid query
  * exists at all. No settlement/refund/winner logic lives here (Phase I).
  */

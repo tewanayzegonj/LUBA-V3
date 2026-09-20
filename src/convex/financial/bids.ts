@@ -36,6 +36,23 @@
  *  - exactly-once economics per idempotency key (cross-user replay is
  *    structurally impossible — the key binds the user).
  *
+ * Account restrictions & future rate/abuse controls (enforcement seam):
+ *  - CURRENT: the only account restriction enforced is the frozen
+ *    verified-phone requirement (caller, fail-closed). No bid-volume cap,
+ *    duplicate-amount rule, or account-tier restriction exists in the
+ *    contract, so none is evaluated here — no policy values are invented.
+ *  - FUTURE SEAM (Phase B/C contracts already in place): an account-
+ *    eligibility evaluation belongs as a pure decision core in
+ *    `domain/bids.ts`, invoked inside `submitBid` after the configured
+ *    policy validation and BEFORE wallet validation — a refusal there
+ *    persists the frozen REJECTED row (zero economic effect) exactly like
+ *    the other bid-path classes. A rate/abuse check (e.g. against
+ *    `rateAbuseEvents`) belongs at the `placeBid` mutation boundary in
+ *    `bids.ts`, BEFORE the transaction — it must refuse without economic
+ *    effect and without fabricating thresholds. Nothing is pre-wired:
+ *    activation awaits the still-OPEN PRD decisions (bid-volume cap,
+ *    anti-abuse rules).
+ *
  * Not implemented here (Phase I+): winner determination, settlement,
  * refunds, no-winner processing.
  */
