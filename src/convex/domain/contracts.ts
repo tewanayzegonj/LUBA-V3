@@ -289,6 +289,11 @@ export const AUDIT_ACTIONS = [
   "notification.sent",
   // Privileged/operator actions (TRD §20)
   "operator.action",
+  // Read-only operational checks (Phase I exit gate): reconciliation reports
+  // findings to the audit trail; it never mutates financial state. These are
+  // observability classifications, not economic operations.
+  "reconciliation.passed",
+  "reconciliation.drift_found",
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 export const isAuditAction = (value: string): value is AuditAction =>

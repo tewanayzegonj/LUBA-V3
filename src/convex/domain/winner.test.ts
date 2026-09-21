@@ -205,7 +205,7 @@ describe("page-boundary / resume invariance (frozen test set)", () => {
 
   test("resume-point invariance: every interruption point yields identical result+count", () => {
     const entries = entriesOf(37);
-    const ref = determineWinner(entries);
+    const full = determineWinner(entries);
     // Walk the full sequence once, snapshotting state at every prefix.
     let s = initialWalkState();
     const snapshots: WalkState[] = [s];

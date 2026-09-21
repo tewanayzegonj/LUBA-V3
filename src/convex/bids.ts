@@ -29,10 +29,9 @@
  * No live bid counter exists (OPEN decision, TRD §19); no public bid query
  * exists at all. No settlement/refund/winner logic lives here (Phase I).
  */
-import { getAuthUserId } from "@convex-dev/auth/server";
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
-import { requireVerifiedPhoneUser } from "./guards/auth";
+import { requireAuthenticated, requireVerifiedPhoneUser } from "./guards/auth";
 import { checkAndRecordRate } from "./guards/abuse";
 import { projectOwnBids, submitBid } from "./financial/bids";
 
@@ -47,7 +46,6 @@ export const placeBid = mutation({
   },
   handler: async (ctx, args) => {
     // ── Authenticate + verified phone (fail-closed, server-side) ──
-    const authUserId = await getAuthUserId(ctx);
     const guard = await requireVerifiedPhoneUser({
       auth: ctx.auth,
       db: ctx.db,
@@ -55,7 +53,6 @@ export const placeBid = mutation({
     if (!guard.ok) {
       return { ok: false as const, status: "refused" as const, reason: guard.reason };
     }
-    void authUserId; // identity flows exclusively through the guard
 
     // ── Server-authoritative time (TRD §17) — the client clock is
     //    display-only and is never accepted as input. ──
@@ -112,12 +109,15 @@ export const listMyBids = query({
   handler: async (ctx, args) => {
     // Ownership enforced server-side: only the caller's own bid rows are
     // even readable here — IDOR-resistant by construction.
-    const authUserId = await getAuthUserId(ctx);
-    if (authUserId === null) return [];
+    // Identity goes through the shared guard core (NOT raw getAuthUserId):
+    // an Anonymous-provider session resolves to a users row but is never
+    // accepted (TRD §4 frozen) — it is refused before any row is read.
+    const guard = await requireAuthenticated(ctx as unknown as Parameters<typeof requireAuthenticated>[0]);
+    if (!guard.ok) return [];
     const rows = await ctx.db
       .query("bids")
       .withIndex("by_bidder_auction", (q) =>
-        q.eq("bidderId", authUserId).eq("auctionId", args.auctionId),
+        q.eq("bidderId", guard.value.userId).eq("auctionId", args.auctionId),
       )
       .collect();
     // Blind-safe whitelisted projection (amount, fee, status, refundStatus,

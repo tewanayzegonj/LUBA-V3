@@ -54,9 +54,24 @@ export type IdentityCtx = {
 
 /* ── Pure evaluators (unit-testable cores) ── */
 
-/** Shared auth core: null-safe over an absent user row; returns the row. */
+/**
+ * Anonymity gate (TRD §4 FROZEN): the template's platform-managed Anonymous
+ * provider mints a `users` row with `isAnonymous: true` and no LUBA identity
+ * registration. That token path is "never accepted for any route" — so the
+ * shared auth core rejects it before ANY surface-specific logic runs, for
+ * every guard built on this core (self-profile, financial, operator).
+ *
+ * Fail-closed by construction: the check is equality against the provider's
+ * marker flag; a row without the flag is unaffected, and any future provider
+ * that does not set the flag cannot accidentally pass this gate — LUBA
+ * identity provisioning (`ensureLubaIdentity`) remains the only path into
+ * real identity. The refusal reuses the shared `not_authorized` vocabulary
+ * (anti-enumeration: indistinguishable from other authorization failures,
+ * never echoing that the session is anonymous).
+ */
 function authenticatedUser(user: Doc<"users"> | null): GuardResult<Doc<"users">> {
   if (user === null) return { ok: false, reason: "unauthenticated" };
+  if (user.isAnonymous === true) return { ok: false, reason: "not_authorized" };
   return { ok: true, value: user };
 }
 

@@ -160,8 +160,6 @@ export const internalSweepStalledCampaigns = internalMutation({
 
 /* ══════════════════ Projections (frozen plan §15) ══════════════════ */
 
-type CtxRow = Record<string, unknown> & { _id: string };
-
 /**
  * Winner-only pending settlement view: ownership-enforced (server-side
  * caller check against settlementRecords.winnerId); exposes only the

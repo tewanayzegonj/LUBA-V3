@@ -24,8 +24,6 @@
  * `crons.json` — NOT registered there until the owner approves a cadence
  * (TRD OQ12-adjacent; the trigger is operational either way).
  */
-import { v } from "convex/values";
-
 import { internalMutation, mutation } from "./_generated/server";
 import { requireOperator } from "./guards/auth";
 import { recordAuditEvent } from "./guards/audit";
@@ -41,10 +39,14 @@ type ReconRow = Record<string, unknown> & { _id: string };
 
 type ReconDb = {
   get: (id: string) => Promise<ReconRow | null>;
+  // Audit inserts flow through recordAuditEvent (append-only auditEvents).
+  insert: (table: string, doc: Record<string, unknown>) => Promise<string>;
   query: (table: string) => {
     withIndex: (
       name: string,
-      fn: (q: never) => never,
+      // Filter callback: the structural type stays loose (all full-range
+      // scans here); the real Convex filter builder satisfies it.
+      fn: (...args: never[]) => unknown,
     ) => {
       collect: () => Promise<ReconRow[]>;
     };
@@ -90,7 +92,7 @@ export async function runReconciliation(
   const db = ctx.db;
 
   // Read every wallet projection (1:1 with users).
-  const walletRows = await db.query("wallets").withIndex("by_user", (_q: never) => null).collect();
+  const walletRows = await db.query("wallets").withIndex("by_user", () => undefined).collect();
   const wallets = walletRows.map((w) => ({
     userId: w.userId as string,
     availableSantim: w.availableSantim as number,
@@ -101,7 +103,7 @@ export async function runReconciliation(
   // per-account sums are recomputed from the fetched rows.
   const postingRows = await db
     .query("ledgerPostings")
-    .withIndex("by_userSide", (_q: never) => null)
+    .withIndex("by_userSide", () => undefined)
     .collect();
   const postings: ReconciliationPosting[] = postingRows.map((p) => ({
     account: p.account as string,

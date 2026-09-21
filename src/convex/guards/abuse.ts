@@ -19,8 +19,6 @@
  * workers (identity-free by design) do not compose this guard on their own
  * scheduled paths; only user-initiated entry points do.
  */
-import type { Id } from "../_generated/dataModel";
-
 import { evaluateRateLimit, nextCount, windowStartFor } from "../domain/abuse";
 import { getAbuseThreshold } from "../abuseConfig";
 
@@ -78,5 +76,33 @@ export async function checkAndRecordRate(
     now: input.now,
     existingCount: existing !== null ? existing.count : null,
   });
-  if (!decision.ok) throw new Error("abuse guard: unreachable decision failure");
+
+  // Guard inactive (threshold OPEN/unset): zero-effect no-op — no counter
+  // write, no behavior change for the caller.
+  if (decision.observedCount === null) {
+    return { ok: true, windowStart, guardActive: false };
+  }
+
+  if (!decision.allowed) {
+    return {
+      ok: false,
+      reason: "rate_limited",
+      windowStart,
+      retryAfterMs: windowStart + config.windowMs - input.now,
+    };
+  }
+
+  // Allowed: create or increment the counter row INSIDE the caller's
+  // transaction — the throttle hit is atomic with the guarded effect.
+  if (existing === null) {
+    await ctx.db.insert("abuseCounters", {
+      subject: input.subject,
+      subjectId: input.subjectId,
+      windowStart,
+      count: nextCount(null),
+    });
+  } else {
+    await ctx.db.patch(existing._id, { count: nextCount(existing as never) });
+  }
+  return { ok: true, windowStart, guardActive: true };
 }

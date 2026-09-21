@@ -14,7 +14,6 @@ import type { Id } from "../_generated/dataModel";
 
 import { closeAuction } from "../auction/lifecycle";
 import { determineWinner } from "../domain/winner";
-import { evaluateCampaignValidity, evaluateTerminalization } from "../domain/settlement";
 import {
   createFinalizationHook,
   processRefundChunk,
@@ -22,8 +21,6 @@ import {
   sweepStalledCampaigns,
   sweepVoidExpiredSettlements,
 } from "./settlement";
-import { refundBid } from "./refunds";
-import { reserveInventory } from "../inventory/reservations";
 import { ensureWallet, postWalletTransaction } from "./wallet";
 
 /* ── Identity scaffolding ── */
@@ -199,7 +196,7 @@ type Store = ReturnType<typeof makeStore>;
  * install an isolated deadline provider via the config module's test-only
  * registration hook and REMOVE it in a finally block. The production policy
  * stays unconfigured (null ⇒ fail closed) outside these scopes. ── */
-import { __setTestSettlementDeadlineProvider, getSettlementDeadlineMs } from "../settlementConfig";
+import { __setTestSettlementDeadlineProvider } from "../settlementConfig";
 const injectDeadline = (ms: number) => __setTestSettlementDeadlineProvider(() => ms);
 
 /* ── Seeding helpers ── */
