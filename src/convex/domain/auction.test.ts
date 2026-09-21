@@ -894,11 +894,22 @@ describe("finalization seam and backstop", () => {
     expect(again.closed).toBe(0);
   });
 
-  test("the close backstop is NOT cron-registered (Phase I composes finalization)", async () => {
+  test("the close backstop IS cron-registered with the Phase I finalization hook composed", async () => {
+    // Frozen Phase I §14: four minute-level crons — open sweep, close sweep
+    // (with determination/finalization composed), void sweep, campaign backstop.
     const crons = await Bun.file("src/convex/crons.json").json();
     const registered = Object.values(crons) as Array<{ function: string }>;
-    expect(registered.some((c) => c.function.includes("internalSweepCloseExpired"))).toBe(false);
     expect(registered.some((c) => c.function.includes("internalSweepOpenScheduled"))).toBe(true);
+    expect(
+      registered.some((c) => c.function.includes("internalSweepCloseExpired")),
+    ).toBe(true);
+    expect(
+      registered.some((c) => c.function.includes("internalSweepVoidExpiredSettlements")),
+    ).toBe(true);
+    expect(registered.some((c) => c.function.includes("internalSweepStalledCampaigns"))).toBe(
+      true,
+    );
+    expect(Object.keys(crons)).toHaveLength(4);
   });
 });
 

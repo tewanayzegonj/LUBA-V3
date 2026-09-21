@@ -8,6 +8,9 @@ import {
   auctionResult,
   auctionStatus,
   bidStatus,
+  campaignKind,
+  campaignStatus,
+  campaignTrigger,
   confirmationSource,
   fulfillmentMethod,
   fulfillmentStatus,
@@ -260,10 +263,11 @@ const schema = defineSchema(
       placedAt: v.number(), // server tx time
       idempotencyKey: v.string(), // unique (§13)
     })
-      .index("by_auction_amount", ["auctionId", "amountSantim"]) // winner determination + duplicate-amount rule
+      .index("by_auction_amount", ["auctionId", "amountSantim"]) // duplicate-amount rule (OPEN decision); NOT the settlement walk
       .index("by_bidder_auction", ["bidderId", "auctionId"]) // own-bids projections
       .index("by_idempotencyKey", ["idempotencyKey"]) // FROZEN exactly-once discipline
-      .index("by_auction_status", ["auctionId", "status"]),
+      .index("by_auction_status", ["auctionId", "status"]) // refund campaigns + own-bids
+      .index("by_auction_status_amount", ["auctionId", "status", "amountSantim"]), // Phase I determination walk: ACCEPTED-only, amount-ascending
 
     /* ── §10 auctionResults — exactly one per auction, after finalization ──
        Written in the finalization transaction; re-execution is idempotent by
@@ -403,6 +407,40 @@ const schema = defineSchema(
       windowStart: v.number(),
       count: v.number(),
     }).index("by_subject_window", ["subject", "subjectId", "windowStart"]),
+
+    /* ── Phase I settlementCampaigns — resumable winner-determination and
+       per-bid refund campaigns over the post-close immutable accepted-bid
+       set (frozen Phase I plan §5). One campaign per (auctionId, kind);
+       creation is guarded transactionally (check-then-insert + range OCC —
+       the index is a lookup, not a uniqueness constraint). `pageCursor` is
+       the OPAQUE Convex pagination continuation string — stored verbatim,
+       never decoded, never a document ID. Determination campaigns persist
+       the full singleton-walk resume state (currentAmount/currentRunCount/
+       currentCandidateBidId + the decoupled immutable winnerBidId + the
+       running acceptedCount); only index exhaustion is conclusive — the
+       result, finalAcceptedBidCount, and winningBidId commit together.
+       Refund campaigns carry the paginate cursor + processedCount and
+       terminalize ONLY on the final page's isDone === true, in the same
+       transaction as the last per-bid refunds + CLOSED→SETTLED + audit.
+       Cross-field validity (frozen gate): winner_determination ⇒ trigger
+       absent; bid_refunds ⇒ valid trigger required. ── */
+    settlementCampaigns: defineTable({
+      auctionId: v.id("auctions"),
+      kind: campaignKind, // winner_determination | bid_refunds
+      trigger: v.optional(campaignTrigger), // no_winner | settlement_void — refund campaigns only
+      status: campaignStatus, // in_progress | complete
+      pageCursor: v.optional(v.string()), // opaque .paginate() continuation
+      currentAmount: v.optional(v.number()), // walk: amount of the run in progress
+      currentRunCount: v.optional(v.number()), // walk: bids seen in that run
+      currentCandidateBidId: v.optional(v.id("bids")), // walk: candidate of the CURRENT run only
+      winnerBidId: v.optional(v.id("bids")), // walk: first confirmed singleton — IMMUTABLE once set
+      acceptedCount: v.optional(v.number()), // walk: running ACCEPTED total → authoritative at exhaustion
+      processedCount: v.number(), // ops visibility (pages/refunds processed)
+      createdAt: v.number(),
+      completedAt: v.optional(v.number()),
+    })
+      .index("by_auction_kind", ["auctionId", "kind"]) // lookup for the creation guard (not a constraint)
+      .index("by_status", ["status"]), // backstop sweep: in_progress only
   },
   {
     // Backend Schema §0 FROZEN mandate: every status is a closed union and

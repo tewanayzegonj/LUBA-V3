@@ -3,5 +3,20 @@
     "type": "scheduled",
     "crontab": "* * * * *",
     "function": "auctions:internalSweepOpenScheduled"
+  },
+  "sweepCloseExpired": {
+    "type": "scheduled",
+    "crontab": "* * * * *",
+    "function": "settlement:internalSweepCloseExpired"
+  },
+  "sweepVoidExpiredSettlements": {
+    "type": "scheduled",
+    "crontab": "* * * * *",
+    "function": "settlement:internalSweepVoidExpiredSettlements"
+  },
+  "sweepStalledCampaigns": {
+    "type": "scheduled",
+    "crontab": "* * * * *",
+    "function": "settlement:internalSweepStalledCampaigns"
   }
 }

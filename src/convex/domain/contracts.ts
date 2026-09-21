@@ -238,6 +238,20 @@ export const idempotencyOp = v.union(
   ...IDEMPOTENCY_OPS.map((s) => v.literal(s)),
 );
 
+/* ── Settlement campaigns (Phase I, frozen plan §5) — resumable winner
+   determination / per-bid refund work over post-close immutable sets. ── */
+export const CAMPAIGN_KINDS = ["winner_determination", "bid_refunds"] as const;
+export type CampaignKind = (typeof CAMPAIGN_KINDS)[number];
+export const campaignKind = v.union(...CAMPAIGN_KINDS.map((s) => v.literal(s)));
+
+export const CAMPAIGN_TRIGGERS = ["no_winner", "settlement_void"] as const;
+export type CampaignTrigger = (typeof CAMPAIGN_TRIGGERS)[number];
+export const campaignTrigger = v.union(...CAMPAIGN_TRIGGERS.map((s) => v.literal(s)));
+
+export const CAMPAIGN_STATUSES = ["in_progress", "complete"] as const;
+export type CampaignStatus = (typeof CAMPAIGN_STATUSES)[number];
+export const campaignStatus = v.union(...CAMPAIGN_STATUSES.map((s) => v.literal(s)));
+
 /* ── Audit ── */
 export const ACTOR_ROLES = ["user", "operator", "system"] as const;
 export type ActorRole = (typeof ACTOR_ROLES)[number];

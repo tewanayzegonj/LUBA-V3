@@ -227,10 +227,20 @@ export async function openAuction(
 
 /* ══════════════════════════ CLOSE (OPEN → CLOSED) — finalization seam ══════════════════════════ */
 
-export type CloseFinalizationResult = {
-  /** "WINNER" keeps the auction CLOSED with settlement pending (Phase I). */
-  result: "WINNER" | "NO_WINNER";
-};
+export type CloseFinalizationResult =
+  | {
+      /** "WINNER" keeps the auction CLOSED with settlement pending (Phase I). */
+      result: "WINNER" | "NO_WINNER";
+    }
+  | {
+      /** Phase I frozen extension: determination exceeded the per-tx page
+       * budget. The hook persisted/advanced the determination campaign;
+       * `closeAuction` must NOT apply the CLOSED patch — the auction stays
+       * OPEN (bids refused by time) until the close sweep resumes and the
+       * walk concludes. */
+      deferred: true;
+      reason: "determination_deferred";
+    };
 
 /**
  * Phase I composition hook: winner determination + settlement-pending /
@@ -304,24 +314,33 @@ export async function closeAuction(
   const transition = requireAuctionTransition(auction.status, "CLOSED");
   if (!transition.ok) return { ok: false, reason: "illegal_transition" };
 
-  await db.patch(input.auctionId, {
-    status: "CLOSED",
-    resultDeterminedAt: input.now,
-  });
-
-  // Phase I composition point: determination + settlement-pending /
-  // NO_WINNER release, same transaction. A finalize throw propagates:
-  // in Convex any thrown error ABORTS the transaction, so a failing
-  // finalization can never commit a result-less CLOSED auction (zero
-  // partial state — the pre-close patch rolls back with everything else).
+  // Phase I composition point — the hook runs BEFORE the CLOSED patch (one
+  // transaction; commit-order equivalent to the frozen Phase G wording).
+  //   Conclusive outcome ⇒ CLOSED + resultDeterminedAt + determination all
+  //   commit together (CLOSED commits only with a determined result).
+  //   Deferred outcome (frozen Phase I extension: per-tx page budget
+  //   exceeded) ⇒ the CLOSED patch is SKIPPED — only the hook's campaign
+  //   writes commit; the auction stays OPEN (bids refused by server time)
+  //   until the close sweep resumes the walk to a conclusion.
+  //   A finalize throw propagates: in Convex any thrown error ABORTS the
+  //   transaction, so a failing finalization can never commit anything
+  //   (zero partial state).
   let result: "WINNER" | "NO_WINNER" | null = null;
   if (input.finalize !== undefined) {
     const outcome = await input.finalize(ctx, {
       auctionId: input.auctionId,
       now: input.now,
     });
+    if ("deferred" in outcome) {
+      return { ok: true, auctionId: input.auctionId, replayed: false, result: null };
+    }
     result = outcome.result;
   }
+
+  await db.patch(input.auctionId, {
+    status: "CLOSED",
+    resultDeterminedAt: input.now,
+  });
 
   await recordAuditEvent(ctx, {
     actorId: null,

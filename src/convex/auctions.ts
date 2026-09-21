@@ -13,10 +13,10 @@
  * Internal seams (scheduled functions / later phases only):
  *  - `internalSweepOpenScheduled` — the scheduled→open backstop
  *    (cron-registered in `crons.json`).
- *  - `internalSweepCloseExpired` — the close backstop SEAM, deliberately
- *    NOT cron-registered until Phase I composes the finalization hook
- *    (see `auction/lifecycle.ts`): a result-less CLOSED auction must never
- *    exist in the frozen model.
+ *  - The close backstop moved to `settlement.ts` in Phase I, where the
+ *    finalization hook (winner determination + settlement/refund
+ *    composition) is composed; see `settlement:internalSweepCloseExpired`,
+ *    cron-registered in `crons.json`.
  *
  * OPEN decisions untouched: bid fee/model (`feeSantim` is accepted only as
  * explicit operator config), min/max bid, duplicate-amount rule, bid-volume
@@ -40,7 +40,6 @@ import type { AuctionStatus, FulfillmentMethod } from "./domain/contracts";
 import {
   openAuction as openAuctionPrimitive,
   publishAuction as publishAuctionPrimitive,
-  sweepCloseExpired,
   sweepOpenScheduled,
 } from "./auction/lifecycle";
 
@@ -280,13 +279,5 @@ export const internalSweepOpenScheduled = internalMutation({
   args: {},
   handler: async (ctx) => {
     return sweepOpenScheduled(ctx as unknown as AuctionCtx, { now: Date.now() });
-  },
-});
-
-export const internalSweepCloseExpired = internalMutation({
-  args: {},
-  handler: async (ctx) => {
-    // No finalize hook yet — Phase I composes it. NOT cron-registered.
-    return sweepCloseExpired(ctx as unknown as AuctionCtx, { now: Date.now() });
   },
 });

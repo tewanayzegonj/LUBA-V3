@@ -102,6 +102,13 @@ export type WalletTxLeg = {
   /** > 0 integer santims. Sign fixes direction: `+` credit (funds in),
    * `-` debit (funds out). The leg is a single signed delta per user. */
   deltaSantim: number;
+  /**
+   * Funding-provenance tag (Phase I): lot ids carried onto THIS leg's wallet
+   * ledger posting (`ledgerPostings.provenanceLotIds` — the FROZEN provenance
+   * carrier, Backend Schema §4.2: "set on wallet credits created by refunds
+   * and tracked on debits for lot consumption"). Bid fees attach the lots
+   * the debit consumed; refunds attach the lots being re-credited. */
+  provenanceLotIds?: Id<"provenanceLots">[];
 };
 
 export type PostWalletTransactionInput = {
@@ -185,6 +192,9 @@ export async function postWalletTransaction(
     userSide: leg.userId,
     direction: leg.deltaSantim > 0 ? ("credit" as const) : ("debit" as const),
     amountSantim: Math.abs(leg.deltaSantim),
+    // Phase I seam: the leg's provenance tag lands on its posting verbatim
+    // (debits track consumption; refund credits tag the restored lots).
+    ...(leg.provenanceLotIds !== undefined ? { provenanceLotIds: leg.provenanceLotIds } : {}),
   }));
   const netDeltas = netWalletDeltas(walletPostings);
   if (netDeltas.size === 0) {

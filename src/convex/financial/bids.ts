@@ -71,7 +71,7 @@ import {
   deriveIdempotencyKey,
   fingerprintRequest,
 } from "../guards/idempotency";
-import { consumeProvenanceLots } from "./provenance";
+import { consumeProvenanceLots, restoreProvenanceLots } from "./provenance";
 import { postWalletTransaction, type WalletCtx } from "./wallet";
 import { applyAntiSnipeExtension } from "../auction/lifecycle";
 
@@ -325,54 +325,16 @@ export async function submitBid(
     idempotencyKey: key,
   })) as Id<"bids">;
 
-  // ── Charge the fee + validate balance atomically. Preconditions run
-  //    inside postWalletTransaction BEFORE any write: insufficient balance
-  //    is a clean rejection — the bid row is patched to REJECTED and the
-  //    result is idempotently recorded. ──
-  const posted = await postWalletTransaction(ctx as unknown as WalletCtx, {
-    kind: "bid_fee",
-    refType: "bid",
-    refId: bidId,
-    walletLegs: [{ userId: input.bidderId, deltaSantim: -feeSantim }],
-    counterpartPostings: [
-      {
-        account: "platform:bid_fee_revenue",
-        direction: "credit",
-        amountSantim: feeSantim,
-      },
-    ],
-    ownerUserId: input.bidderId,
-    idempotencyToken: `fee:${input.idempotencyToken}`,
-    idempotencyOp: "bid",
-  });
-  if (!posted.ok) {
-    const reason = posted.status === "conflict" ? "idempotency_conflict" : posted.reason;
-    if (reason === "insufficient_funds") {
-      await persistRejection(ctx, {
-        bidId,
-        key,
-        fingerprint,
-        auctionId: input.auctionId,
-        bidderId: input.bidderId,
-        amountSantim: input.amountSantim,
-        now: input.now,
-        reason: "insufficient_funds",
-        isNewRow: true, // patch the ACCEPTED row in place → REJECTED
-      });
-      return { ok: false, status: "rejected", reason: "insufficient_funds", bidId };
-    }
-    // Any other refusal is an invariant violation — abort (zero effect).
-    throw new Error(`bid fee charge refused: ${reason}`);
-  }
-  if (posted.status !== "posted") {
-    // A fee-ledger replay inside a fresh bid attempt is an invariant
-    // violation (the effect must run exactly once) — abort the transaction.
-    throw new Error("bid fee ledger replay is unreachable");
-  }
-
-  // ── Provenance: consume the funding lots behind the fee debit. The
+  // ── Provenance: consume the funding lots behind the fee debit FIRST so
+  //    the fee journal entry can carry the EXACT consumed lots on its wallet
+  //    posting (`ledgerPostings.provenanceLotIds` — the FROZEN provenance
+  //    carrier; Phase I refunds restore precisely these lots). The
   //    allocation ORDER stays OPEN (FIFO is only a candidate); this caller
-  //    orders newest-first, which the Phase D primitive accepts as-is. ──
+  //    orders newest-first, which the Phase D primitive accepts as-is.
+  //    Provenance and wallet balance are kept in lockstep by construction,
+  //    so insufficient provenance ⇔ insufficient balance: either way the
+  //    frozen `insufficient_funds` rejection class applies with zero
+  //    economic effect. ──
   const openLots = (await db
     .query("provenanceLots")
     .withIndex("by_user", (q) => q.eq("userId", input.bidderId))
@@ -387,9 +349,82 @@ export async function submitBid(
     orderedLotIds,
   });
   if (!consumed.ok) {
-    // Provenance and balance are kept in lockstep by construction; any
-    // divergence is an invariant failure — abort (zero partial effect).
-    throw new Error(`provenance consumption failed: ${consumed.reason}`);
+    // Lockstep invariant: not enough lots ⇔ not enough balance. Frozen
+    // rejection: patch the ACCEPTED row in place → REJECTED, idempotent
+    // replay, zero economic effect.
+    await persistRejection(ctx, {
+      bidId,
+      key,
+      fingerprint,
+      auctionId: input.auctionId,
+      bidderId: input.bidderId,
+      amountSantim: input.amountSantim,
+      now: input.now,
+      reason: "insufficient_funds",
+      isNewRow: true,
+    });
+    return { ok: false, status: "rejected", reason: "insufficient_funds", bidId };
+  }
+
+  // ── Charge the fee + validate balance atomically, carrying the consumed
+  //    provenance onto the wallet debit posting. Preconditions run inside
+  //    postWalletTransaction BEFORE any write. ──
+  const posted = await postWalletTransaction(ctx as unknown as WalletCtx, {
+    kind: "bid_fee",
+    refType: "bid",
+    refId: bidId,
+    walletLegs: [
+      {
+        userId: input.bidderId,
+        deltaSantim: -feeSantim,
+        provenanceLotIds: consumed.allocations.map((a) => a.lotId),
+      },
+    ],
+    counterpartPostings: [
+      {
+        account: "platform:bid_fee_revenue",
+        direction: "credit",
+        amountSantim: feeSantim,
+      },
+    ],
+    ownerUserId: input.bidderId,
+    idempotencyToken: `fee:${input.idempotencyToken}`,
+    idempotencyOp: "bid",
+  });
+  if (!posted.ok) {
+    const reason = posted.status === "conflict" ? "idempotency_conflict" : posted.reason;
+    if (reason === "insufficient_funds") {
+      // Unreachable while the lockstep invariant holds (insufficient
+      // provenance already refused above) — defensive handling: restore
+      // the just-consumed lots in this same transaction, then frozen
+      // rejection with zero net economic effect.
+      await restoreProvenanceLots(ctx, {
+        ownerUserId: input.bidderId,
+        records: consumed.allocations.map((a) => ({
+          lotId: a.lotId,
+          amountSantim: a.amountSantim,
+        })),
+      });
+      await persistRejection(ctx, {
+        bidId,
+        key,
+        fingerprint,
+        auctionId: input.auctionId,
+        bidderId: input.bidderId,
+        amountSantim: input.amountSantim,
+        now: input.now,
+        reason: "insufficient_funds",
+        isNewRow: true,
+      });
+      return { ok: false, status: "rejected", reason: "insufficient_funds", bidId };
+    }
+    // Any other refusal is an invariant violation — abort (zero effect).
+    throw new Error(`bid fee charge refused: ${reason}`);
+  }
+  if (posted.status !== "posted") {
+    // A fee-ledger replay inside a fresh bid attempt is an invariant
+    // violation (the effect must run exactly once) — abort the transaction.
+    throw new Error("bid fee ledger replay is unreachable");
   }
 
   // ── Anti-snipe — ONLY after the accepted bid + fee exist in this
@@ -431,6 +466,10 @@ export async function submitBid(
       bidId,
       ledgerEntryId: posted.entryId,
       antiSnipeNewCloseAt,
+      // Phase I: exact provenance allocations of this fee debit — the refund
+      // engine restores precisely these (lot → amount) records. Greenfield:
+      // every accepted bid's fee outcome carries them.
+      allocations: consumed.allocations,
     }),
   });
 
