@@ -33,6 +33,7 @@ import { getAuthUserId } from "@convex-dev/auth/server";
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { requireVerifiedPhoneUser } from "./guards/auth";
+import { checkAndRecordRate } from "./guards/abuse";
 import { projectOwnBids, submitBid } from "./financial/bids";
 
 const idempotencyToken = v.string();
@@ -59,6 +60,21 @@ export const placeBid = mutation({
     // ── Server-authoritative time (TRD §17) — the client clock is
     //    display-only and is never accepted as input. ──
     const now = Date.now();
+
+    // ── Generic abuse throttle (mechanism only): one `bid_submit` hit per
+    //    attempt, recorded in this same transaction. Thresholds are OPEN —
+    //    while unconfigured this is a zero-write no-op. This is generic
+    //    throttling ONLY (Backend Schema §16): it is never a product
+    //    bid-volume cap, and it runs AFTER the auth gate so an unverified
+    //    caller cannot even burn a throttle slot. ──
+    const throttle = await checkAndRecordRate(ctx as unknown as Parameters<typeof checkAndRecordRate>[0], {
+      subject: "bid_submit",
+      subjectId: guard.value.userId,
+      now,
+    });
+    if (!throttle.ok) {
+      return { ok: false as const, status: "refused" as const, reason: throttle.reason };
+    }
 
     // ── The one transactional submission path ──
     const result = await submitBid(
