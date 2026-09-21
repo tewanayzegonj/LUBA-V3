@@ -52,14 +52,21 @@ type SurfaceDb = {
 function settlementCtx(ctx: { db: unknown } & Record<string, unknown>): SettlementCtx {
   const raw = ctx as unknown as {
     db: SurfaceDb;
-    scheduleNextRefundChunk?: SettlementCtx["scheduleNextRefundChunk"];
+    scheduler?: { runAfter: (delayMs: number, ref: string, args: unknown) => Promise<void> };
   };
-  // Internal workers run identity-free; chunk continuation is wired to the
-  // Convex scheduler target below (test fakes may inject their own).
+  // Internal workers run identity-free; chunk continuation wires the REAL
+  // Convex scheduler when present (scheduled functions inherit NO auth —
+  // exactly-once is per-bid/system-keyed, frozen plan §13).
+  const scheduler = raw.scheduler;
   return {
     db: raw.db,
     scheduleNextRefundChunk:
-      raw.scheduleNextRefundChunk ?? (async () => {}),
+      scheduler !== undefined
+        ? (campaignId) =>
+            scheduler.runAfter(0, "settlement:internalProcessRefundChunkScheduled", {
+              campaignId,
+            })
+        : async () => {},
   } as unknown as SettlementCtx;
 }
 

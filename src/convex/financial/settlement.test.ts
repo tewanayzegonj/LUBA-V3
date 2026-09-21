@@ -686,7 +686,331 @@ describe("winner settlement", () => {
       winningAmountSantim: 300,
       finalAcceptedBidCount: 1,
       closeTime: CLOSE_AT,
-      determinedAt: now: CLOSE_AT,
-    } as never);
+      determinedAt: NOW,
+    });
+    store.db.insert("settlementRecords", {
+      auctionId,
+      winnerId: B1,
+      amountSantim: 300,
+      status: "pending",
+      deadline: CLOSE_AT + 3_600_000,
+      idempotencyKey: `luba:idem:settlement:${auctionId}`,
+    });
+    // NO wallet funding — the winner cannot cover the debit.
+    const ctx = makeSettlementCtx(store);
+    const outcome = await settleWinner(ctx as never, {
+      auctionId,
+      callerId: B1,
+      phoneVerified: true,
+      now: CLOSE_AT + 1_000,
+    });
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) throw new Error("expected refusal");
+    expect(outcome.reason).toBe("insufficient_funds");
+    // Zero economic effect: no settlement entry, record still pending,
+    // auction still CLOSED, inventory still reserved.
+    expect(store.rows("ledgerEntries").filter((e) => e.kind === "settlement")).toHaveLength(0);
+    expect(store.rows("settlementRecords")[0].status).toBe("pending");
+    const auction = await store.db.get(auctionId);
+    expect(auction!.status).toBe("CLOSED");
+    expect(store.rows("inventoryReservations")[0].status).toBe("reserved");
+  });
+});
+
+/* ═══════════════ 3. Refund campaigns (chunked, isDone-gated) ═══════════════ */
+
+describe("refund campaigns", () => {
+  test("full chunked run: refunds all accepted bids, final page terminalizes CLOSED→SETTLED", async () => {
+    const store = makeStore();
+    seedPrize(store);
+    seedUser(store, OP, "operator");
+    const auctionId = seedAuctionRow(store, { status: "CLOSED", resultDeterminedAt: NOW });
+    reserveForAuction(store, auctionId);
+    for (let i = 0; i < 5; i += 1) {
+      seedAcceptedBid(store, auctionId, i, [B1, B2, B3][i % 3], 100 + i);
+      await fundWallet(store, [B1, B2, B3][i % 3] as Id<"users">, FEE);
+    }
+    const campaignId = store.db.insert("settlementCampaigns", {
+      auctionId,
+      kind: "bid_refunds",
+      trigger: "no_winner",
+      status: "in_progress",
+      processedCount: 0,
+      createdAt: NOW,
+    }) as unknown as Id<"settlementCampaigns">;
+
+    const ctx = makeSettlementCtx(store);
+    // Drive the campaign by following the scheduler until it settles.
+    let guard = 0;
+    let settled = false;
+    while (guard < 50) {
+      guard += 1;
+      const outcome = await processRefundChunk(ctx as never, {
+        campaignId,
+        now: NOW + guard,
+      });
+      if (!outcome.ok) throw new Error(`chunk refused: ${outcome.reason}`);
+      if (outcome.status === "settled") {
+        settled = true;
+        break;
+      }
+    }
+    expect(settled).toBe(true);
+    // Every accepted bid refunded exactly once.
+    expect(store.rows("bidRefunds")).toHaveLength(5);
+    const refundedBids = store.rows("bids").filter((b) => b.refundStatus === "refunded");
+    expect(refundedBids).toHaveLength(5);
+    // Campaign complete; auction SETTLED.
+    const campaign = await store.db.get(campaignId);
+    expect(campaign!.status).toBe("complete");
+    const auction = await store.db.get(auctionId);
+    expect(auction!.status).toBe("SETTLED");
+    // Inventory released (NO_WINNER release happened at finalization; here
+    // the reservation must NOT be committed).
+    expect(store.rows("inventoryReservations")[0].status).not.toBe("committed");
+    // Settlement audit exists.
+    expect(store.auditEvents.some((e) => e.action === "auction.settled" && e.actorRole === "system")).toBe(true);
+  });
+
+  test("per-bid refunds land in wallets with exact provenance", async () => {
+    const store = makeStore();
+    seedPrize(store);
+    seedUser(store, OP, "operator");
+    const auctionId = seedAuctionRow(store, { status: "CLOSED", resultDeterminedAt: NOW });
+    reserveForAuction(store, auctionId);
+    seedAcceptedBid(store, auctionId, 1, B1, 100);
+    await fundWallet(store, B1, FEE);
+    const walletBefore = store.rows("wallets").find((w) => w.userId === B1)!.availableSantim as number;
+    const campaignId = store.db.insert("settlementCampaigns", {
+      auctionId,
+      kind: "bid_refunds",
+      trigger: "no_winner",
+      status: "in_progress",
+      processedCount: 0,
+      createdAt: NOW,
+    }) as unknown as Id<"settlementCampaigns">;
+
+    const ctx = makeSettlementCtx(store);
+    await processRefundChunk(ctx as never, { campaignId, now: NOW + 1 });
+
+    const bid = store.rows("bids")[0];
+    expect(bid.refundStatus).toBe("refunded");
+    const refund = store.rows("bidRefunds")[0];
+    expect(refund.feeSantim).toBe(FEE);
+    expect((refund.provenanceLotIds as string[]).length).toBe(1);
+    // Wallet credited by exactly the fee.
+    const walletAfter = store.rows("wallets").find((w) => w.userId === B1)!.availableSantim as number;
+    expect(walletAfter).toBe(walletBefore + FEE);
+    // Refund journal entry exists (kind refund).
+    expect(store.rows("ledgerEntries").filter((e) => e.kind === "refund")).toHaveLength(1);
+  });
+
+  test("already-refunded bids replay as no-ops — reprocessing the final page stays exactly-once", async () => {
+    const store = makeStore();
+    seedPrize(store);
+    seedUser(store, OP, "operator");
+    const auctionId = seedAuctionRow(store, { status: "CLOSED", resultDeterminedAt: NOW });
+    reserveForAuction(store, auctionId);
+    seedAcceptedBid(store, auctionId, 1, B1, 100);
+    await fundWallet(store, B1, FEE);
+    const campaignId = store.db.insert("settlementCampaigns", {
+      auctionId,
+      kind: "bid_refunds",
+      trigger: "no_winner",
+      status: "in_progress",
+      processedCount: 0,
+      createdAt: NOW,
+    }) as unknown as Id<"settlementCampaigns">;
+
+    const ctx = makeSettlementCtx(store);
+    const first = await processRefundChunk(ctx as never, { campaignId, now: NOW + 1 });
+    expect(first.ok && first.status === "settled").toBe(true);
+    const refundsAfterFirst = store.rows("bidRefunds").length;
+    const walletAfterFirst = store.rows("wallets").find((w) => w.userId === B1)!.availableSantim;
+
+    // Replay the completed campaign — the backstop's no-op path.
+    const replay = await processRefundChunk(ctx as never, { campaignId, now: NOW + 2 });
+    expect(replay.ok).toBe(true);
+    expect(store.rows("bidRefunds")).toHaveLength(refundsAfterFirst);
+    expect(store.rows("wallets").find((w) => w.userId === B1)!.availableSantim).toBe(walletAfterFirst);
+    expect(store.rows("auctions").find((a) => a._id === auctionId)!.status).toBe("SETTLED");
+  });
+});
+
+/* ═══════════════ 4. Deadline void sweep ═══════════════ */
+
+describe("settlement deadline void", () => {
+  test("deadline lapse: voided + result amended NO_WINNER + RELEASE + refunds campaign", async () => {
+    const store = makeStore();
+    seedPrize(store);
+    seedUser(store, OP, "operator");
+    const auctionId = seedAuctionRow(store, { status: "CLOSED", resultDeterminedAt: NOW });
+    reserveForAuction(store, auctionId);
+    seedAcceptedBid(store, auctionId, 1, B1, 300);
+    seedAcceptedBid(store, auctionId, 2, B2, 100);
+    seedAcceptedBid(store, auctionId, 3, B2, 100);
+    store.db.insert("auctionResults", {
+      auctionId,
+      result: "WINNER",
+      winningBidId: store.rows("bids")[0]._id,
+      winningAmountSantim: 300,
+      finalAcceptedBidCount: 3,
+      closeTime: CLOSE_AT,
+      determinedAt: NOW,
+    });
+    const recordId = store.db.insert("settlementRecords", {
+      auctionId,
+      winnerId: B1,
+      amountSantim: 300,
+      status: "pending",
+      deadline: CLOSE_AT + 3_600_000,
+      idempotencyKey: `luba:idem:settlement:${auctionId}`,
+    }) as unknown as Id<"settlementRecords">;
+
+    const ctx = makeSettlementCtx(store);
+    const sweep = await sweepVoidExpiredSettlements(ctx as never, {
+      now: CLOSE_AT + 3_600_000 + 1,
+    });
+    expect(sweep.voided).toBe(1);
+    const record = await store.db.get(recordId);
+    expect(record!.status).toBe("voided");
+    const result = store.rows("auctionResults")[0];
+    expect(result.result).toBe("NO_WINNER");
+    expect(store.rows("inventoryReservations")[0].status).toBe("released");
+    const campaign = store.rows("settlementCampaigns").find((c) => c.kind === "bid_refunds");
+    expect(campaign!.trigger).toBe("settlement_void");
+    expect(campaign!.status).toBe("in_progress");
+    expect(store.auditEvents.some((e) => e.action === "settlement.voided")).toBe(true);
+  });
+
+  test("not-yet-expired settlements are untouched; already-voided replay cleanly", async () => {
+    const store = makeStore();
+    seedPrize(store);
+    seedUser(store, OP, "operator");
+    const auctionId = seedAuctionRow(store, { status: "CLOSED", resultDeterminedAt: NOW });
+    reserveForAuction(store, auctionId);
+    seedAcceptedBid(store, auctionId, 1, B1, 300);
+    store.db.insert("auctionResults", {
+      auctionId,
+      result: "WINNER",
+      winningBidId: store.rows("bids")[0]._id,
+      winningAmountSantim: 300,
+      finalAcceptedBidCount: 1,
+      closeTime: CLOSE_AT,
+      determinedAt: NOW,
+    });
+    store.db.insert("settlementRecords", {
+      auctionId,
+      winnerId: B1,
+      amountSantim: 300,
+      status: "pending",
+      deadline: CLOSE_AT + 3_600_000,
+      idempotencyKey: `luba:idem:settlement:${auctionId}`,
+    });
+    const ctx = makeSettlementCtx(store);
+    // Before the deadline: nothing happens.
+    const early = await sweepVoidExpiredSettlements(ctx as never, { now: CLOSE_AT + 1 });
+    expect(early.voided).toBe(0);
+    expect(store.rows("settlementRecords")[0].status).toBe("pending");
+  });
+});
+
+/* ═══════════════ 5. Campaign backstop ═══════════════ */
+
+describe("campaign backstop", () => {
+  test("re-kicks in_progress refund campaigns only; completed campaigns untouched", async () => {
+    const store = makeStore();
+    seedPrize(store);
+    seedUser(store, OP, "operator");
+    const auctionId = seedAuctionRow(store, { status: "CLOSED", resultDeterminedAt: NOW });
+    const inProgress = store.db.insert("settlementCampaigns", {
+      auctionId,
+      kind: "bid_refunds",
+      trigger: "no_winner",
+      status: "in_progress",
+      processedCount: 0,
+      createdAt: NOW,
+    }) as unknown as Id<"settlementCampaigns">;
+    store.db.insert("settlementCampaigns", {
+      auctionId,
+      kind: "bid_refunds",
+      trigger: "no_winner",
+      status: "complete",
+      processedCount: 5,
+      createdAt: NOW,
+    });
+    const ctx = makeSettlementCtx(store);
+    const result = await sweepStalledCampaigns(ctx as never, { now: NOW + 1 });
+    expect(result.requeued).toBe(1);
+    expect(ctx.scheduled).toEqual([inProgress]);
+  });
+});
+
+/* ═══════════════ 6. O1 fail-closed with isolated test injection ═══════════════ */
+
+describe("O1 deadline policy (isolated injection — never a production default)", () => {
+  test("injected deadline: WINNER finalization succeeds and stamps deadline; unset throws fail-closed", async () => {
+    const { __setTestSettlementDeadlineProvider, getSettlementDeadlineMs } = await import("../settlementConfig");
+    const store = makeStore();
+    seedPrize(store);
+    seedUser(store, OP, "operator");
+    const auctionId = seedAuctionRow(store);
+    reserveForAuction(store, auctionId);
+    seedAcceptedBid(store, auctionId, 1, B1, 300);
+    seedAcceptedBid(store, auctionId, 2, B2, 100);
+    seedAcceptedBid(store, auctionId, 3, B2, 100);
+
+    // Production accessor stays null while unconfigured...
+    expect(getSettlementDeadlineMs()).toBeNull();
+
+    // ...the test injects an ISOLATED configuration (frozen gate #2).
+    __setTestSettlementDeadlineProvider(() => 3_600_000);
+    try {
+      const outcome = await closeAuction(store.ctx, {
+        auctionId,
+        now: CLOSE_AT,
+        finalize: createFinalizationHook(),
+      });
+      expect(outcome.ok).toBe(true);
+      if (!outcome.ok || outcome.result !== "WINNER") throw new Error("expected WINNER");
+      const auction = await store.db.get(auctionId);
+      expect(auction!.status).toBe("CLOSED");
+      expect(auction!.settlementDeadline).toBe(CLOSE_AT + 3_600_000);
+      expect(store.rows("settlementRecords")[0].status).toBe("pending");
+    } finally {
+      __setTestSettlementDeadlineProvider(null);
+    }
+    // Injection removed: production policy is unconfigured again.
+    expect(getSettlementDeadlineMs()).toBeNull();
+  });
+
+  test("unset deadline: WINNER finalization throws settlement_deadline_unconfigured — no result-less CLOSED", async () => {
+    const store = makeStore();
+    seedPrize(store);
+    seedUser(store, OP, "operator");
+    const auctionId = seedAuctionRow(store);
+    reserveForAuction(store, auctionId);
+    seedAcceptedBid(store, auctionId, 1, B1, 300);
+    seedAcceptedBid(store, auctionId, 2, B2, 100);
+    seedAcceptedBid(store, auctionId, 3, B2, 100);
+
+    let threw = false;
+    try {
+      await closeAuction(store.ctx, {
+        auctionId,
+        now: CLOSE_AT,
+        finalize: createFinalizationHook(),
+      });
+    } catch (err) {
+      threw = true;
+      expect((err as Error).message).toBe("settlement_deadline_unconfigured");
+    }
+    expect(threw).toBe(true);
+    // In real Convex the throw aborts the whole transaction; the fake store
+    // reproduces observable partial state — assert nothing result-shaped
+    // leaked: no result row, no settlement record, auction not CLOSED.
+    expect(store.rows("auctionResults")).toHaveLength(0);
+    expect(store.rows("settlementRecords")).toHaveLength(0);
+    expect((await store.db.get(auctionId))!.status).toBe("OPEN");
   });
 });

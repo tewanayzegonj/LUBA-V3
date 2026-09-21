@@ -19,8 +19,28 @@
  * below is the single seam a future configuration freeze edits.
  */
 export function getSettlementDeadlineMs(): number | null {
+  // Isolated test/staging injection (frozen freeze gate #2): tests may use
+  // their own deadline configuration WITHOUT changing the production policy.
+  // Production default below stays null — no default is ever invented.
+  if (testDeadlineProvider !== null) return testDeadlineProvider();
   // O1 [OPEN] — unconfigured. No default is invented.
   return null;
+}
+
+type SettlementDeadlineProvider = () => number | null;
+
+let testDeadlineProvider: SettlementDeadlineProvider | null = null;
+
+/**
+ * [TEST-ONLY] Register an isolated deadline configuration for the duration
+ * of a test/staging scope. NEVER call from production code paths; the
+ * production default remains unconfigured (null) and callers still fail
+ * closed on null. Pass null to restore the production (unconfigured) policy.
+ */
+export function __setTestSettlementDeadlineProvider(
+  provider: SettlementDeadlineProvider | null,
+): void {
+  testDeadlineProvider = provider;
 }
 
 /* ── [IMPL] campaign budgets — engineering parameters from §16.5 staging

@@ -249,6 +249,14 @@ async function concludeDetermination(
     return { result: prior as "WINNER" | "NO_WINNER" };
   }
 
+  // Determination campaign completion is ATOMIC with the authoritative work
+  // (frozen: the backstop must never reprocess a completed campaign) — the
+  // result, finalAcceptedBidCount, winningBidId, and campaign completion
+  // commit together in this one transaction.
+  if (input.campaignId !== null) {
+    await db.patch(input.campaignId, { status: "complete", completedAt: input.now });
+  }
+
   if (conclusion.result === "WINNER") {
     // Winner amount read from the authoritative bid row — never computed.
     const winningBid = await db.get(conclusion.winnerBidId);
@@ -660,17 +668,16 @@ export async function processRefundChunk(
     // Completed campaigns are never reprocessed (backstop no-op).
     return { ok: true, status: "continued", processed: 0, isDone: true };
   }
-  const auctionId = (await db.get(input.campaignId)) !== null
-    ? ((await db.get((campaign as unknown as { auctionId: string }).auctionId)) as AuctionRowShape | null)
-    : null;
-  if (auctionId === null) return { ok: false, status: "refused", reason: "auction_not_found" };
+  const auction = (await db.get(campaign.auctionId as string)) as AuctionRowShape | null;
+  if (auction === null) return { ok: false, status: "refused", reason: "auction_not_found" };
+  const auctionId = campaign.auctionId as Id<"auctions">;
 
   // Real pagination over the immutable post-close ACCEPTED set; the opaque
   // cursor is passed and stored verbatim — never decoded, never an id.
   const page = await db
     .query("bids")
     .withIndex("by_auction_status", (q) =>
-      q.eq("auctionId", (campaign as unknown as { auctionId: string }).auctionId).eq("status", "ACCEPTED"),
+      q.eq("auctionId", auctionId).eq("status", "ACCEPTED"),
     )
     .order("asc")
     .paginate({ cursor: campaign.pageCursor, numItems: REFUND_CHUNK_SIZE });
@@ -680,7 +687,7 @@ export async function processRefundChunk(
   let processed = 0;
   for (const bid of page.page) {
     const outcome = await refundBid(ctx, {
-      auctionId: (campaign as unknown as { auctionId: string }).auctionId as Id<"auctions">,
+      auctionId: auctionId as Id<"auctions">,
       bidId: bid._id as Id<"bids">,
       now: input.now,
     });
@@ -708,15 +715,15 @@ export async function processRefundChunk(
       pageCursor: page.continueCursor,
       processedCount: (campaign.processedCount ?? 0) + processed,
     });
-    const transition = evaluateSettledTransition(auctionId.status);
+    const transition = evaluateSettledTransition(auction.status);
     if (!transition.ok) throw new Error(`settled transition refused: ${transition.reason}`);
-    await db.patch(auctionId._id, { status: "SETTLED" });
+    await db.patch(auction._id, { status: "SETTLED" });
     await recordAuditEvent(ctx, {
       actorId: null,
       actorRole: "system",
       action: "auction.settled",
       entityType: "auctions",
-      entityId: auctionId._id,
+      entityId: auction._id,
       meta: {
         via: "refund_campaign",
         trigger: campaign.trigger ?? null,
