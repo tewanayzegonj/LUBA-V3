@@ -124,6 +124,7 @@ function makeStore(options: { failOnInsert?: string } = {}) {
               paginate: async (opts: { cursor?: string; numItems: number }) => {
                 // Deterministic pagination over the ascending-amount order
                 // (mirrors by_auction_status_amount / by_auction_status).
+                void _dir;
                 const rows = scan().sort((a, b) => {
                   const aa = (a.amountSantim as number) ?? 0;
                   const bb = (b.amountSantim as number) ?? 0;
