@@ -252,12 +252,23 @@ async function concludeDetermination(
   // Determination campaign completion is ATOMIC with the authoritative work
   // (frozen: the backstop must never reprocess a completed campaign) — the
   // result, finalAcceptedBidCount, winningBidId, and campaign completion
-  // commit together in this one transaction.
-  if (input.campaignId !== null) {
-    await db.patch(input.campaignId, { status: "complete", completedAt: input.now });
-  }
+  // commit together in this one transaction. The patch lives INSIDE each
+  // branch so the O1 fail-closed guard below precedes EVERY write.
 
   if (conclusion.result === "WINNER") {
+    // O1 fail-closed BEFORE any write: an unset deadline policy refuses
+    // WINNER finalization — the throw aborts the whole close transaction
+    // (no result row, no settlement record, no completed campaign, no
+    // CLOSED auction can ever commit).
+    const deadlineMs = getSettlementDeadlineMs();
+    if (deadlineMs === null) {
+      throw new Error("settlement_deadline_unconfigured");
+    }
+
+    if (input.campaignId !== null) {
+      await db.patch(input.campaignId, { status: "complete", completedAt: input.now });
+    }
+
     // Winner amount read from the authoritative bid row — never computed.
     const winningBid = await db.get(conclusion.winnerBidId);
     if (winningBid === null) throw new Error("winning bid row disappeared mid-walk");
@@ -272,14 +283,6 @@ async function concludeDetermination(
       determinedAt: input.now,
     });
 
-    // O1 fail-closed: an unset deadline policy refuses WINNER finalization
-    // — the throw aborts the whole close transaction (no result-less
-    // CLOSED auction can ever commit; the walk state was not persisted as
-    // a campaign on this conclusive pass).
-    const deadlineMs = getSettlementDeadlineMs();
-    if (deadlineMs === null) {
-      throw new Error("settlement_deadline_unconfigured");
-    }
     await db.patch(input.auctionId, {
       settlementDeadline: input.now + deadlineMs,
     });
@@ -296,6 +299,9 @@ async function concludeDetermination(
   }
 
   // NO_WINNER: result + refunds campaign + inventory RELEASE, one tx.
+  if (input.campaignId !== null) {
+    await db.patch(input.campaignId, { status: "complete", completedAt: input.now });
+  }
   await db.insert("auctionResults", {
     auctionId: input.auctionId,
     result: "NO_WINNER",

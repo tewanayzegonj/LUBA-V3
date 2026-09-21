@@ -19,6 +19,7 @@
  */
 import { v } from "convex/values";
 import { getAuthUserId } from "@convex-dev/auth/server";
+import type { Id } from "./_generated/dataModel";
 import { internalMutation, mutation, query } from "./_generated/server";
 import { requireVerifiedPhoneUser } from "./guards/auth";
 import {
@@ -62,7 +63,7 @@ function settlementCtx(ctx: { db: unknown } & Record<string, unknown>): Settleme
     db: raw.db,
     scheduleNextRefundChunk:
       scheduler !== undefined
-        ? (campaignId) =>
+        ? (campaignId: Id<"settlementCampaigns">) =>
             scheduler.runAfter(0, "settlement:internalProcessRefundChunkScheduled", {
               campaignId,
             })
